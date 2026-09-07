@@ -109,7 +109,7 @@ async def start(client, message):
         if len(message.command) != 2:
             buttons = [[
                         InlineKeyboardButton('🔰 ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ 🔰', url=f'http://t.me/{temp.U_NAME}?startgroup=true')
-                    ],[ InlineKeyboardButton('🎬 MOVIE GROUP 🎬', url='https://t.me/+DNA3Uc3wisU5ODA1')
+                    ],[ InlineKeyboardButton('🎬 MOVIE REQUEST GROUP 🎬', url='https://t.me/+DNA3Uc3wisU5ODA1')
                       ],[
                         InlineKeyboardButton(' ʜᴇʟᴘ 📢', callback_data='help'),
                         InlineKeyboardButton(' ᴀʙᴏᴜᴛ 📖', callback_data='about')
