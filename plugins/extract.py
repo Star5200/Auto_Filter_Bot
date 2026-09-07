@@ -191,9 +191,7 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
         else:
             page_parts.append("<b>Subtitle Tracks:</b> None<br>")
 
-        page_parts.append(
-            '<i><code>Join <a href="https://t.me/DreamxBotz">DreamxBotz</a></code></i>'
-        )
+        
 
         page_content = "".join(page_parts)
 
