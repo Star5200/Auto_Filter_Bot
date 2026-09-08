@@ -200,7 +200,7 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
                 telegraph.create_page,
                 title=safe_title[:200],
                 html_content=page_content,
-                author_name="DreamxBotz"
+                author_name="@Star_CinemaTm"
             )
         except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
             await query.message.reply_text("⚠️ Telegraph is busy. Try again later.", quote=True)
