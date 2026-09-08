@@ -35,7 +35,7 @@ INDEX_CAPTION = is_enabled(environ.get('SAVE_CAPTION', "True"), True) # Save cap
 COVERX = is_enabled(environ.get('COVERX', "True"), True) # Use cover image for indexed files (default: True)
 # If you disable it then bot will use a default thumb for all files
 
-PICS_URL = (environ.get('PICS', 'https://api.aniwallpaper.workers.dev/random?type=girl')).split() #random anime girl img each time from aniwallpaper (Experimental)
+PICS_URL = (environ.get('PICS', '')).split() #random anime girl img each time from aniwallpaper (Experimental)
 PICS = (environ.get('PICS', 'https://graph.org/file/816f8e36b4e8b164f1340-3c5fef38229902a28e.jpg https://graph.org/file/686acc131ce707a9b0cdb-d32675c23557ae5af2.jpg https://graph.org/file/6e6a71848d5bcb3648cae-c607bdf89a26f52238.jpg https://graph.org/file/26ff3e88ed8e1516e8fbb-045c0d0035528f0714.jpg https://graph.org/file/1c73ac728f2fbbcebe44e-a390c524c869ce9c5a.jpg https://graph.org/file/70b8cf6a5128ac54a3771-5fabae591e5fa89369.jpg')).split()  # Sample pic
 NOR_IMG = environ.get("NOR_IMG", "https://graph.org/file/e20b5fdaf217252964202.jpg")
 MELCOW_PHOTO = environ.get("MELCOW_PHOTO", "https://graph.org/file/56b5deb73f3b132e2bb73.jpg")
