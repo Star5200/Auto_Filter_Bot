@@ -556,6 +556,39 @@ async def delete_group_setting(group_id, key):
         temp.SETTINGS[group_id] = current
         await db.update_settings(group_id, current)
 
+# ---------- Auto language detection (added) ----------
+LANG_MAP = {
+    "Hindi": r"hindi|hin",
+    "English": r"english|eng",
+    "Tamil": r"tamil|tam",
+    "Telugu": r"telugu|tel",
+    "Malayalam": r"malayalam|mal",
+    "Kannada": r"kannada|kan",
+    "Bengali": r"bengali|ben",
+    "Marathi": r"marathi|mar",
+    "Punjabi": r"punjabi|pun",
+    "Gujarati": r"gujarati|guj",
+}
+
+def detect_langs(text):
+    text = re.sub(r"[._\-\[\]()+,/|]", " ", str(text or "")).lower()
+    found = [n for n, p in LANG_MAP.items() if re.search(rf"\b({p})\b", text)]
+    if not found and re.search(r"\b(dual|multi)\b", text):
+        found = ["Dual Audio"]
+    return found
+
+def add_lang_line(caption, *sources):
+    """Caption ke neeche language line jodta hai (agar pehle se nahi hai)."""
+    caption = caption or ""
+    if "🔊" in caption or re.search(r"\baudio\b", caption, re.I):
+        return caption
+    langs = detect_langs(" ".join(str(s) for s in sources if s))
+    if not langs:
+        return caption
+    line = f"<blockquote>🔊 {', '.join(langs)}</blockquote>"
+    return f"{caption}\n\n{line}" if caption.strip() else line
+# ---------- end ----------
+
 def clean_filename(file_name):
     prefixes = ('[', '@', 'www.')
     unwanted = {word.lower() for word in BAD_WORDS}
