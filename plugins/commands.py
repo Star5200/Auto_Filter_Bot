@@ -25,7 +25,7 @@ from info import (
     LOG_CHANNEL, SHORTENER_API, SHORTENER_API2, SHORTENER_API3, SHORTENER_WEBSITE, SHORTENER_WEBSITE2, SHORTENER_WEBSITE3,
     
 )
-from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, get_random_mix_id
+from utils import get_settings, save_group_settings, is_subscribed, is_req_subscribed, get_size, get_shortlink, is_check_admin, temp, get_readable_time, get_time, generate_settings_text, log_error, clean_filename, add_lang_line, get_random_mix_id
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +366,7 @@ async def start(client, message):
                             f_caption = f_caption
                     if f_caption is None:
                         f_caption = f"{clean_filename(files1.file_name)}"
+                    f_caption = add_lang_line(f_caption, files1.file_name, files1.caption)
                     btn = await stream_buttons(message.from_user.id, file_id)
                     msg = await client.send_cached_media(
                         chat_id=message.from_user.id,
@@ -419,6 +420,7 @@ async def start(client, message):
                         f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='')
                     except Exception:
                         return
+                f_caption = add_lang_line(f_caption, file.file_name)
                 await msg.edit_caption(f_caption, reply_markup=InlineKeyboardMarkup(btn))
                 k = await msg.reply(script.DEL_MSG.format(get_time(DELETE_TIME)), quote=True, parse_mode=enums.ParseMode.HTML)
                 await asyncio.sleep(DELETE_TIME)
@@ -446,6 +448,7 @@ async def start(client, message):
 
         if f_caption is None:
             f_caption = clean_filename(files.file_name)
+        f_caption = add_lang_line(f_caption, files.file_name, files.caption)
         btn = await stream_buttons(message.from_user.id, file_id)
         msg = await client.send_cached_media(
             chat_id=message.from_user.id,
