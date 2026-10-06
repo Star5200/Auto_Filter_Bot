@@ -376,6 +376,7 @@ async def start(client, message):
                         protect_content=settings.get('file_secure', PROTECT_CONTENT),
                         reply_markup=InlineKeyboardMarkup(btn)
                     )
+                    asyncio.create_task(db.add_file_history(message.from_user.id, file_id, files1.file_name, files1.file_size, grp_id))
                     filesarr.append(msg)
                 k = await client.send_message(chat_id=message.from_user.id, text=script.DEL_MSG.format(get_time(DELETE_TIME)), parse_mode=enums.ParseMode.HTML)
 
@@ -412,6 +413,7 @@ async def start(client, message):
                 file = getattr(msg, filetype.value)
                 title = clean_filename(file.file_name)
                 size=get_size(file.file_size)
+                asyncio.create_task(db.add_file_history(message.from_user.id, file_id, file.file_name, file.file_size, grp_id))
                 f_caption = f"<code>{title}</code>"
                 settings = await get_settings(int(grp_id))
                 DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
@@ -458,6 +460,7 @@ async def start(client, message):
             protect_content=settings.get('file_secure', PROTECT_CONTENT),
             reply_markup=InlineKeyboardMarkup(btn)
         )
+        asyncio.create_task(db.add_file_history(message.from_user.id, files.file_id, files.file_name, files.file_size, grp_id))
         
         k = await msg.reply(script.DEL_MSG.format(get_time(DELETE_TIME)), quote=True, parse_mode=enums.ParseMode.HTML)
         await asyncio.sleep(DELETE_TIME)

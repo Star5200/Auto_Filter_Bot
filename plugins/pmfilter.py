@@ -833,10 +833,6 @@ async def filter_seasons_cb_handler(client: Client, query: CallbackQuery):
 @Client.on_callback_query(group=10)
 async def cb_handler(client: Client, query: CallbackQuery):
     DreamxData = query.data
-    try:
-        await client.create_chat_invite_link(int(REQST_CHANNEL))
-    except Exception:
-        pass
     if query.data == "close_data":
         try:
             user = query.message.reply_to_message.from_user.id
