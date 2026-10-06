@@ -1,4 +1,6 @@
+import os
 import random
+import asyncio
 import logging
 from collections import OrderedDict
 
@@ -7,7 +9,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
 from database.users_chats_db import db, FILE_HISTORY_DAYS
-from info import PICS
+from info import PICS, DELETE_TIME
 from utils import temp, get_size, clean_filename
 
 logger = logging.getLogger(__name__)
@@ -15,6 +17,18 @@ logger = logging.getLogger(__name__)
 TZ = pytz.timezone("Asia/Kolkata")
 MAX_FILES_PER_DATE = 40  # ek date mein max itne file buttons
 LINE = "────────────────────"
+# History message kitni der baad auto-delete ho (seconds). Default: DELETE_TIME jitna (movies jaisa)
+HISTORY_DELETE_TIME = int(os.environ.get("HISTORY_DELETE_TIME", DELETE_TIME))
+
+
+async def _delete_later(delay, *messages):
+    """delay seconds ke baad diye gaye messages delete kar deta hai (error aaye to ignore)."""
+    await asyncio.sleep(delay)
+    for m in messages:
+        try:
+            await m.delete()
+        except Exception:
+            pass
 
 
 def _to_local(ts):
@@ -95,27 +109,30 @@ async def history_cmd(client, message):
     if not message.from_user:
         return
     if message.chat.type != enums.ChatType.PRIVATE:
-        return await message.reply_text(
+        notice = await message.reply_text(
             "<b>Apni file history dekhne ke liye bot ke PM mein /history use karein.</b>",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("📂 Open History", url=f"https://t.me/{temp.U_NAME}")
             ]]),
             parse_mode=enums.ParseMode.HTML,
         )
+        asyncio.create_task(_delete_later(60, notice))
+        return
     docs = await db.get_file_history(message.from_user.id)
     grouped = group_by_date(docs)
     total = sum(len(v) for v in grouped.values())
     text = main_text(message.from_user.mention, total)
     markup = main_buttons(grouped)
     try:
-        await message.reply_photo(
+        sent = await message.reply_photo(
             photo=random.choice(PICS),
             caption=text,
             reply_markup=markup,
             parse_mode=enums.ParseMode.HTML,
         )
     except Exception:
-        await message.reply_text(text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+        sent = await message.reply_text(text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+    asyncio.create_task(_delete_later(HISTORY_DELETE_TIME, sent, message))
 
 
 @Client.on_callback_query(filters.regex(r"^(hist_main|hist_d_\d{8})$"))
