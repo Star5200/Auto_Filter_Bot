@@ -577,7 +577,7 @@ def detect_langs(text):
         found = ["Dual Audio"]
     return found
 
-def add_lang_line(caption, *sources):
+def _add_lang_core(caption, *sources):
     """Caption ke neeche language line jodta hai (agar pehle se nahi hai)."""
     caption = caption or ""
     if "🔊" in caption or re.search(r"\baudio\b", caption, re.I):
@@ -587,6 +587,17 @@ def add_lang_line(caption, *sources):
         return caption
     line = f"<blockquote>🔊 {', '.join(langs)}</blockquote>"
     return f"{caption}\n\n{line}" if caption.strip() else line
+
+# VLC line: har file ke caption ke end mein judegi
+VLC_LINE = '<b>⚠️ Use VLC Player to avoid sound issues &amp; switch languages</b>'
+
+def add_lang_line(caption, *sources):
+    caption = _add_lang_core(caption, *sources)
+    if "VLC Player" in caption:
+        return caption
+    if len(caption) + len(VLC_LINE) > 1000:  # Telegram caption limit 1024
+        return caption
+    return f"{caption}\n\n{VLC_LINE}" if caption.strip() else VLC_LINE
 # ---------- end ----------
 
 def clean_filename(file_name):
