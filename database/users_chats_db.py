@@ -14,6 +14,8 @@ from info import (
 
 logger = logging.getLogger(__name__)
 
+FILE_HISTORY_DAYS = 15  # /history kitne din ki dikhani hai
+
 class Database:    
     def __init__(self, uri, database_name):
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
@@ -30,6 +32,8 @@ class Database:
         self.filename_col = self.db.filename
         self.movie_updates = self.db.movie_updates
         self.connection = self.db.connections
+        self.file_history = self.db.file_history  # /history feature
+        self._hist_idx_ready = False
 
     async def add_name(self, filename):
         if await self.movie_updates.find_one({'_id': filename}):
@@ -453,6 +457,34 @@ class Database:
     async def update_maintenance_status(self, bot_id, enable):
         await self.update_bot_setting(bot_id, 'MAINTENANCE', enable)
      
+    # ---------- File history (/history) ----------
+    async def add_file_history(self, user_id, file_id, file_name, file_size, grp_id=0):
+        try:
+            if not self._hist_idx_ready:
+                self._hist_idx_ready = True
+                try:
+                    await self.file_history.create_index("ts", expireAfterSeconds=FILE_HISTORY_DAYS * 86400)
+                    await self.file_history.create_index("user_id")
+                except Exception as e:
+                    logger.error("File history index error: %s", e)
+            await self.file_history.insert_one({
+                'user_id': int(user_id),
+                'file_id': file_id,
+                'file_name': file_name or "File",
+                'file_size': file_size or 0,
+                'grp_id': int(grp_id or 0),
+                'ts': datetime.datetime.utcnow(),
+            })
+        except Exception as e:
+            logger.error("add_file_history error: %s", e)
+
+    async def get_file_history(self, user_id, days=FILE_HISTORY_DAYS):
+        since = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        cursor = self.file_history.find(
+            {'user_id': int(user_id), 'ts': {'$gte': since}}
+        ).sort('ts', -1).limit(500)
+        return await cursor.to_list(length=500)
+
 db = Database(DATABASE_URI, DATABASE_NAME)    
 if MULTIPLE_DB and DATABASE_URI2:
     db2 = Database(DATABASE_URI2, DATABASE_NAME)
