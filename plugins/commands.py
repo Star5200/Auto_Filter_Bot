@@ -6,7 +6,6 @@ import random
 import asyncio
 import string
 import sys
-import time as _time
 import pytz
 from .pmfilter import auto_filter 
 from Script import script
@@ -285,18 +284,12 @@ async def start(client, message):
                         reply_markup = InlineKeyboardMarkup(btn)
                     photo = random.choice(FSUB_PICS) if FSUB_PICS else "https://graph.org/file/7478ff3eac37f4329c3d8.jpg"
                     caption = script.FORCESUB_TXT.format(message.from_user.mention)
-                    sent_fsub = await message.reply_photo(
+                    await message.reply_photo(
                         photo=photo,
                         caption=caption,
                         reply_markup=reply_markup,
                         parse_mode=enums.ParseMode.HTML
                     )
-                    if len(message.command) > 1:  # join karte hi file apne aap bhejne ke liye yaad rakho
-                        if not hasattr(temp, "PENDING_FSUB"):
-                            temp.PENDING_FSUB = {}
-                        if len(temp.PENDING_FSUB) > 2000:
-                            temp.PENDING_FSUB.pop(next(iter(temp.PENDING_FSUB)), None)
-                        temp.PENDING_FSUB[message.from_user.id] = (message.command[1], sent_fsub, _time.time())
                     return
 
             except Exception as e:
