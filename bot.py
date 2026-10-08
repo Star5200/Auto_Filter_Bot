@@ -14,6 +14,7 @@ from database.ia_filterdb import Media, Media2
 from database.users_chats_db import db
 from info import MULTIPLE_DB, ON_HEROKU, LOG_STR, LOG_CHANNEL, PORT
 from utils import temp
+from bot_health import monitor as health_monitor, flush as health_flush
 from Script import script
 from plugins import web_server, check_expired_premium, keep_alive
 from dreamxbotz.Bot import dreamxbotz
@@ -93,10 +94,15 @@ async def dreamxbotz_start():
     bind_address = "0.0.0.0"
     await web.TCPSite(app, bind_address, PORT).start()
     asyncio.create_task(keep_alive())
+    asyncio.create_task(health_monitor(dreamxbotz))
 
     try:
         await idle()
     finally:
+        try:
+            await health_flush()
+        except Exception:
+            pass
         await app.cleanup()
         await dreamxbotz.stop()
 
