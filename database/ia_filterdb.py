@@ -1,4 +1,5 @@
 import logging
+import bot_health
 from struct import pack
 import re
 import base64
@@ -169,6 +170,7 @@ async def save_file(media):
         )
         return False, 3
     #logger.info(f"[SUCCESS] '{file_name}' saved to {target_db} DB.")
+    bot_health.record_file_added()
     return True, 1
 
 async def get_search_results(chat_id, query, file_type=None, max_results=None, offset=0, filter=False):

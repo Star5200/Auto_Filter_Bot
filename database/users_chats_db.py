@@ -2,6 +2,7 @@ import datetime
 import logging
 import pytz  
 import motor.motor_asyncio
+import bot_health
 from info import (
     DATABASE_NAME,DATABASE_URI,DATABASE_URI2, MULTIPLE_DB, MAINTENANCE, PM_SEARCH,
     BUTTON_MODE, P_TTI_SHOW_OFF, PROTECT_CONTENT, IMDB, SPELL_CHECK_REPLY, MELCOW_NEW_USERS, 
@@ -87,6 +88,7 @@ class Database:
     async def add_user(self, id, name):
         user = self.new_user(id, name)
         await self.col.insert_one(user)
+        bot_health.record_new_user()
     
     async def is_user_exist(self, id):
         user = await self.col.find_one({'id':int(id)})
@@ -459,6 +461,7 @@ class Database:
      
     # ---------- File history (/history) ----------
     async def add_file_history(self, user_id, file_id, file_name, file_size, grp_id=0):
+        bot_health.record_download(user_id)
         try:
             if not self._hist_idx_ready:
                 self._hist_idx_ready = True
