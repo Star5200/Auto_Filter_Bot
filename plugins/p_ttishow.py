@@ -1,11 +1,14 @@
+import os
+import sys
 import logging
 import asyncio
 import psutil
+import bot_health
 from time import time
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong, PeerIdInvalid
-from pyrogram.errors import ChatAdminRequired
+from pyrogram.errors import ChatAdminRequired, MessageNotModified
 from info import ADMINS, MULTIPLE_DB, LOG_CHANNEL, OWNER_LNK, MELCOW_PHOTO
 from database.users_chats_db import db
 from database.ia_filterdb import Media, Media2, db as db_stats, db2 as db2_stats, client, client2
@@ -160,61 +163,103 @@ async def re_enable_chat(bot, message):
 
 @Client.on_message(filters.command('stats') & filters.user(ADMINS))
 async def get_stats(bot, message):
+    msg = await message.reply('ᴀᴄᴄᴇꜱꜱɪɴɢ ꜱᴛᴀᴛᴜꜱ ᴅᴇᴛᴀɪʟꜱ...')
     try:
-        msg = await message.reply('ᴀᴄᴄᴇꜱꜱɪɴɢ ꜱᴛᴀᴛᴜꜱ ᴅᴇᴛᴀɪʟꜱ...')
-        total_users = await db.total_users_count()
-        totl_chats = await db.total_chat_count()
-        premium = await db.all_premium_users()
-        file1 = await Media.count_documents()
-        DB_SIZE = 512 * 1024 * 1024
-        
-        # Calculate size for Current Primary DB
-        dbstats = await db_stats.command("dbStats")
-        current_db_size = dbstats['storageSize'] + dbstats['indexSize']
-
-        # Calculate total size for Primary DB Cluster
-        dbs = await client.list_database_names()
-        db_size = 0
-        for db_name in dbs:
-            if db_name in ["admin", "local"]:
-                continue
-            stats = await client[db_name].command("dbStats")
-            db_size += stats['storageSize'] + stats['indexSize']
-            
-        free = DB_SIZE - db_size
-        uptime = get_readable_time(time() - botStartTime)
-        ram = psutil.virtual_memory().percent
-        cpu = psutil.cpu_percent()
-        
-        if not MULTIPLE_DB:
-            await msg.edit(script.STATUS_TXT.format(
-                total_users, totl_chats, premium, file1, get_size(current_db_size), get_size(db_size), get_size(free), uptime, ram, cpu))                                               
-            return
-            
-        file2 = await Media2.count_documents()
-        
-        # Calculate size for Current Secondary DB
-        db2stats = await db2_stats.command("dbStats")
-        current_db2_size = db2stats['storageSize'] + db2stats['indexSize']
-
-        # Calculate total size for Secondary DB Cluster
-        dbs2 = await client2.list_database_names()
-        db2_size = 0
-        for db_name in dbs2:
-            if db_name in ["admin", "local"]:
-                continue
-            stats = await client2[db_name].command("dbStats")
-            db2_size += stats['storageSize'] + stats['indexSize']
-            
-        free2 = DB_SIZE - db2_size
-        
-        await msg.edit(script.MULTI_STATUS_TXT.format(
-            total_users, totl_chats, premium, file1, get_size(current_db_size), get_size(db_size), get_size(free),
-            file2, get_size(current_db2_size), get_size(db2_size), get_size(free2), 
-            uptime, ram, cpu, (int(file1) + int(file2))
-            ))
+        text = await _stats_text()
+        await msg.edit(text, reply_markup=_stats_buttons())
     except Exception as e:
-       logger.error("Error In stats: %s", e)        
+        logger.exception("Error In stats: %s", e)
+        try:
+            await msg.edit(f"<b>❗ Stats error:</b> <code>{e}</code>")
+        except Exception:
+            pass
+
+
+def _stats_buttons(confirm=False):
+    if confirm:
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Yes, Restart", callback_data="hs_restart_yes"),
+            InlineKeyboardButton("❌ Cancel", callback_data="hs_restart_no"),
+        ]])
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔄 Refresh", callback_data="hs_refresh"),
+        InlineKeyboardButton("♻️ Restart", callback_data="hs_restart"),
+    ]])
+
+
+async def _stats_text():
+    info = await bot_health.get_db_info()
+    today = await bot_health.get_today()
+    text, _level = bot_health.build_text(info, today, time() - botStartTime)
+    return text
+
+
+def _hs_is_admin(user_id):
+    return str(user_id) in {str(a) for a in ADMINS}
+
+
+_hs_last_refresh = 0.0
+
+
+@Client.on_callback_query(filters.regex(r"^hs_refresh$"))
+async def stats_refresh(bot, query):
+    global _hs_last_refresh
+    if not _hs_is_admin(query.from_user.id):
+        return await query.answer("Not for you!", show_alert=True)
+    if time() - _hs_last_refresh < 10:
+        return await query.answer("Wait a few seconds before refreshing again.")
+    _hs_last_refresh = time()
+    try:
+        await query.answer("Refreshing...")
+        text = await _stats_text()
+        await query.message.edit_text(text, reply_markup=_stats_buttons())
+    except MessageNotModified:
+        pass
+    except Exception as e:
+        logger.exception("Error in stats refresh: %s", e)
+
+
+@Client.on_callback_query(filters.regex(r"^hs_restart$"))
+async def stats_restart_ask(bot, query):
+    if not _hs_is_admin(query.from_user.id):
+        return await query.answer("Not for you!", show_alert=True)
+    try:
+        await query.answer("Restart the bot?")
+        await query.message.edit_reply_markup(_stats_buttons(confirm=True))
+    except MessageNotModified:
+        pass
+    except Exception as e:
+        logger.exception("Error in restart confirm: %s", e)
+
+
+@Client.on_callback_query(filters.regex(r"^hs_restart_no$"))
+async def stats_restart_cancel(bot, query):
+    if not _hs_is_admin(query.from_user.id):
+        return await query.answer("Not for you!", show_alert=True)
+    try:
+        await query.answer("Cancelled")
+        await query.message.edit_reply_markup(_stats_buttons())
+    except MessageNotModified:
+        pass
+    except Exception as e:
+        logger.exception("Error in restart cancel: %s", e)
+
+
+@Client.on_callback_query(filters.regex(r"^hs_restart_yes$"))
+async def stats_restart_do(bot, query):
+    if not _hs_is_admin(query.from_user.id):
+        return await query.answer("Not for you!", show_alert=True)
+    try:
+        await query.answer("Restarting...")
+        await query.message.edit_text("<b><i>ʙᴏᴛ ɪꜱ ʀᴇꜱᴛᴀʀᴛɪɴɢ</i></b>")
+    except Exception:
+        pass
+    try:
+        await bot_health.flush()
+    except Exception:
+        pass
+    await asyncio.sleep(2)
+    os.execl(sys.executable, sys.executable, *sys.argv)
 
 @Client.on_message(filters.command('invite') & filters.user(ADMINS))
 async def gen_invite(bot, message):

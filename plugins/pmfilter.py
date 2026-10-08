@@ -1,4 +1,5 @@
 import logging
+import bot_health
 from utils import get_random_mix_id, get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, get_settings_text
 from rapidfuzz import process
 from dreamxbotz.util.file_properties import get_name, get_hash
@@ -1484,6 +1485,7 @@ async def auto_filter(client, msg, spoll=False):
                 message_text = message.text or ""
                 search = message_text.lower()
                 m = await message.reply_text(script.SEARCHING_TXT.format(search))
+                bot_health.record_active(message.from_user.id if message.from_user else None)
                 find = search.split(" ")
                 search = ""
                 removes = ["in", "upload", "series", "full",
@@ -1497,7 +1499,9 @@ async def auto_filter(client, msg, spoll=False):
                 search = search.replace("-", " ")
                 search = re.sub(r"[:']", "", search)
                 search = re.sub(r"\s+", " ", search).strip()
+                _t0 = bot_health.perf()
                 files, offset, total_results = await get_search_results(message.chat.id, search, offset=0, filter=True)
+                bot_health.record_speed(bot_health.perf() - _t0)
                 settings = await get_settings(message.chat.id)
                 if not files:
                     if settings.get("spell_check"):
@@ -1527,6 +1531,8 @@ async def auto_filter(client, msg, spoll=False):
             m = await message.reply_text(f'🔎 sᴇᴀʀᴄʜɪɴɢ {search}', reply_to_message_id=message.id)
             settings = await get_settings(message.chat.id)
             await msg.message.delete()
+        if not spoll:
+            bot_health.record_found()
         key = f"{message.chat.id}-{message.id}"
         FRESH[key] = search
         temp.GETALL[key] = files
@@ -1740,6 +1746,7 @@ async def ai_spell_check(chat_id, wrong_name):
         movie_list.remove(movie)
 
 async def advantage_spell_chok(client, message):
+    bot_health.record_missed()
     search = message.text
     query = re.sub(
         r"\b(pl(i|e)*?(s|z+|ease|se|ese|(e+)s(e)?)|((send|snd|giv(e)?|gib)(\sme)?)|movie(s)?|new|latest|br((o|u)h?)*|^h(e|a)?(l)*(o)*|mal(ayalam)?|t(h)?amil|file|that|find|und(o)*|kit(t(i|y)?)?o(w)?|thar(u)?(o)*w?|kittum(o)*|aya(k)*(um(o)*)?|full\smovie|any(one)|with\ssubtitle(s)?)",
