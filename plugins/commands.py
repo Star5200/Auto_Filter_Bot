@@ -18,7 +18,7 @@ from pyrogram.errors import FloodWait, UserNotParticipant , ChannelInvalid, Peer
 from database.ia_filterdb import Media, Media2, get_file_details, unpack_new_file_id, get_bad_files, save_file
 from database.users_chats_db import db
 from info import (
-    LOG_CHANNEL, IMDB_TEMPLATE, IS_VERIFY, TUTORIAL, TUTORIAL_2, TUTORIAL_3, EMOJI_MODE, REACTIONS,
+    LOG_CHANNEL, IMDB_TEMPLATE, IS_VERIFY, TUTORIAL, TUTORIAL_2, TUTORIAL_3, EMOJI_MODE, REACTIONS, START_STICKER,
     VERIFY_IMG, TWO_VERIFY_GAP, UPDATE_CHNL_LNK, PICS, PICS_URL, ADMINS, SUBSCRIPTION, OWNER_LNK , 
     OWNER_UPI_ID, QR_CODE, AUTH_CHANNELS, AUTH_REQ_CHANNELS, FSUB_PICS, THREE_VERIFY_GAP, CUSTOM_FILE_CAPTION,
     COVERX, PROTECT_CONTENT, DELETE_TIME, PREMIUM_STREAM_MODE, STREAM_MODE, SUPPORT_CHAT_ID, REQST_CHANNEL,
@@ -43,6 +43,10 @@ async def start(client, message):
             except Exception:
                 await message.react(emoji="⚡️")
                 pass
+        try:
+            await message.reply_sticker(START_STICKER)
+        except Exception as e:
+            logger.warning("start sticker error: %s", e)
         m = message
         if len(m.command) == 2 and m.command[1].startswith(('notcopy', 'sendall')):
             _, userid, verify_id, file_id = m.command[1].split("_", 3)
