@@ -18,7 +18,7 @@ from pyrogram.errors import FloodWait, UserNotParticipant , ChannelInvalid, Peer
 from database.ia_filterdb import Media, Media2, get_file_details, unpack_new_file_id, get_bad_files, save_file
 from database.users_chats_db import db
 from info import (
-    LOG_CHANNEL, IMDB_TEMPLATE, IS_VERIFY, TUTORIAL, TUTORIAL_2, TUTORIAL_3, EMOJI_MODE, REACTIONS, START_STICKER,
+    LOG_CHANNEL, IMDB_TEMPLATE, IS_VERIFY, TUTORIAL, TUTORIAL_2, TUTORIAL_3, EMOJI_MODE, REACTIONS, START_STICKER, START_STICKER_DELETE_AFTER,
     VERIFY_IMG, TWO_VERIFY_GAP, UPDATE_CHNL_LNK, PICS, PICS_URL, ADMINS, SUBSCRIPTION, OWNER_LNK , 
     OWNER_UPI_ID, QR_CODE, AUTH_CHANNELS, AUTH_REQ_CHANNELS, FSUB_PICS, THREE_VERIFY_GAP, CUSTOM_FILE_CAPTION,
     COVERX, PROTECT_CONTENT, DELETE_TIME, PREMIUM_STREAM_MODE, STREAM_MODE, SUPPORT_CHAT_ID, REQST_CHANNEL,
@@ -34,6 +34,14 @@ BATCH_FILES = {}
 REQUEST_INVITE_LINK_CACHE: dict[int, str] = {}
 
 
+async def _delete_after(msg, seconds):
+    try:
+        await asyncio.sleep(seconds)
+        await msg.delete()
+    except Exception as e:
+        logger.warning("start sticker auto-delete error: %s", e)
+
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     try:
@@ -44,7 +52,8 @@ async def start(client, message):
                 await message.react(emoji="⚡️")
                 pass
         try:
-            await message.reply_sticker(START_STICKER)
+            sticker_msg = await message.reply_sticker(START_STICKER)
+            asyncio.create_task(_delete_after(sticker_msg, START_STICKER_DELETE_AFTER))
         except Exception as e:
             logger.warning("start sticker error: %s", e)
         m = message
