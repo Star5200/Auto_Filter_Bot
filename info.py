@@ -78,7 +78,7 @@ STAR_PREMIUM_PLANS = {
 # ============================
 # MongoDB Configuration
 # ============================
-DATABASE_URI = environ.get('DATABASE_URI', "mongodb+srv://stargaming19062002_db_user:dev123@cluster0.iwrylmb.mongodb.net/?appName=Cluster0")  # MongoDB URI for the database
+DATABASE_URI = environ.get('DATABASE_URI', "")  # MongoDB URI for the database -- set this in Render's Environment tab, never hardcode it here
 DATABASE_NAME = environ.get('DATABASE_NAME', "Cluster0") # Database name (default: cluster)
 COLLECTION_NAME = environ.get('COLLECTION_NAME', 'starcinema_files') # Collection name (default: dreamcinezone_files)
 
@@ -162,8 +162,8 @@ MELCOW_NEW_USERS = is_enabled((environ.get('MELCOW_NEW_USERS', "False")), False)
 PROTECT_CONTENT = is_enabled((environ.get('PROTECT_CONTENT', "False")), False) # Protect Content On (True) / Off (False)
 PM_SEARCH = is_enabled(environ.get('PM_SEARCH', "True"), True)  # PM Search On (True) / Off (False)
 EMOJI_MODE = is_enabled(environ.get('EMOJI_MODE', "True"), True)  # Emoji status On (True) / Off (False)
-START_STICKER = environ.get('START_STICKER', "CAACAgUAAxkBAAESBEtqyO8ulMLhfnIC8gd8LT6AkmdD2wACzBoAAm3KQFWA4HzILPaYTT0E")  # sticker sent on /start
-START_STICKER_DELETE_AFTER = int(environ.get('START_STICKER_DELETE_AFTER', "4"))  # seconds before the /start sticker auto-deletes
+START_STICKER = environ.get('START_STICKER', "CAACAgQAAxkBAAESBcJqywqcvsVtPS7WWnyQOmPmnw4G2QACjgoAAl90AVKfNpKbcyBQND0E")  # sticker sent on /start
+START_STICKER_DELETE_AFTER = float(environ.get('START_STICKER_DELETE_AFTER', "1.5"))  # seconds before the /start sticker auto-deletes (decimals allowed, e.g. 1.5)
 BUTTON_MODE = is_enabled((environ.get('BUTTON_MODE', "False")), False) # pm & Group button or link mode (True) / Off (False)
 STREAM_MODE = is_enabled(environ.get('STREAM_MODE', "False"), False) # Set Stream mode True or False
 PREMIUM_STREAM_MODE = is_enabled(environ.get('PREMIUM_STREAM_MODE', "False"), False) # Set Stream mode True or False only for premium users
