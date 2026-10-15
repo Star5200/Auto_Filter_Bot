@@ -600,6 +600,12 @@ def add_lang_line(caption, *sources):
     return f"{caption}\n\n{VLC_LINE}" if caption.strip() else VLC_LINE
 # ---------- end ----------
 
+EPISODE_RANGE_RE = re.compile(r'\b([Ee])(\d{1,4})\s+[Ee]?(\d{1,4})\b')
+
+def _format_episode_range(text):
+    """Episode range ko 'E45 E60' / 'E01 15' se 'E45-60' / 'E01-15' banata hai."""
+    return EPISODE_RANGE_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}-{m.group(3)}", text)
+
 def clean_filename(file_name):
     prefixes = ('[', '@', 'www.')
     unwanted = {word.lower() for word in BAD_WORDS}
@@ -608,6 +614,7 @@ def clean_filename(file_name):
         word for word in file_name.split()
         if not (word.startswith(prefixes) or word.lower() in unwanted)
     )
+    file_name = _format_episode_range(file_name)
     return file_name
 
 def get_size(size):
