@@ -1151,6 +1151,39 @@ async def cb_handler(client: Client, query: CallbackQuery):
             return
 
 
+    elif DreamxData.startswith("generate_fast_download"):
+        _, file_id = DreamxData.split(":")
+        try:
+            user_id = query.from_user.id
+            username = query.from_user.mention
+            if not await db.has_premium_access(user_id):
+                await query.answer("⚠️ This feature is for Premium users. If you want this feature, buy Premium.", show_alert=True)
+                return
+            log_msg = await client.send_cached_media(chat_id=BIN_CHANNEL, file_id=file_id,)
+            fileName = quote_plus(get_name(log_msg))
+            dreamx_download = f"{URL}{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
+            await query.answer(MSG_ALRT)
+            await asyncio.sleep(1)
+            await log_msg.reply_text(
+                text=f"•• ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ꜰᴏʀ ɪᴅ #{user_id} \n•• ᴜꜱᴇʀɴᴀᴍᴇ : {username} \n\n•• ᖴᎥᒪᗴ Nᗩᗰᗴ : {fileName}",
+                quote=True,
+                disable_web_page_preview=True,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚡ ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ ⚡", url=dreamx_download)]])
+            )
+            dreamcinezone = await query.edit_message_reply_markup(
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⚡ ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ ⚡", url=dreamx_download)],
+                    [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
+                ])
+            )
+            await asyncio.sleep(DELETE_TIME)
+            await dreamcinezone.delete()
+            return
+        except Exception as e:
+            logger.error("Callback error: %s", e)
+            await query.answer(f"⚠️ SOMETHING WENT WRONG FAST DOWNLOAD LINK \n\n{e}", show_alert=True)
+            return
+
     elif query.data == "prestream":
         await query.answer(text=script.PRE_STREAM_ALERT, show_alert=True)
         dreamcinezone = await client.send_photo(
