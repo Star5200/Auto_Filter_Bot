@@ -507,10 +507,7 @@ async def stream_buttons(user_id: int, file_id: str):
                 [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
             ]
     else:
-        # STREAM_MODE is off: plain download-only button (no watch-online),
-        # shown to everyone; premium check happens when the button is clicked.
         return [
-            [InlineKeyboardButton('⚡ ꜰᴀꜱᴛ ᴅᴏᴡɴʟᴏᴀᴅ ⚡', callback_data=f'generate_fast_download:{file_id}')],
             [InlineKeyboardButton('ℹ️ ᴠɪᴇᴡ ᴀᴜᴅɪᴏ & ꜱᴜʙꜱ ɪɴꜰᴏ ℹ️', callback_data=f'extract_data:{file_id}')],
             [InlineKeyboardButton('📌 ᴊᴏɪɴ ᴜᴘᴅᴀᴛᴇꜱ ᴄʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
         ]
