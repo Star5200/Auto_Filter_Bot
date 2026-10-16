@@ -98,7 +98,8 @@ async def pm_text(bot, message):
     try:
         await mdb.update_top_messages(user_id, content)
         pm_search = await db.pm_search_status(bot_id)
-        if pm_search:
+        is_premium = await db.has_premium_access(user_id)
+        if pm_search or is_premium:
             await auto_filter(bot, message)
         else:
             await message.reply_text(
