@@ -268,6 +268,12 @@ Iᴅ : <code>{}</code>
 Nᴀᴍᴇ : {}
 
 Mᴇꜱꜱᴀɢᴇ : <b>{}</b>"""
+
+    MOVIE_REQUEST_FOUND = """🎉 <b>Gᴏᴏᴅ Nᴇᴡs, {}!</b> 🎉
+
+Aᴀᴘɴᴇ ᴊᴏ <b>{}</b> ʀᴇQᴜᴇsᴛ ᴋɪ ᴛʜɪ, ᴡᴏ ᴀʙ ᴅᴀᴛᴀʙᴀsᴇ ᴍᴇɪɴ ᴀᴅᴅ ʜᴏ ɢᴀʏɪ ʜᴀɪ! 🍿
+
+📥 Nᴇᴇᴄʜᴇ ʙᴜᴛᴛᴏɴ ᴅᴀʙᴀ ᴋᴇ ᴀʙʜɪ ᴅᴇᴋʜᴏ 👇"""
     
     CAPTION = """<b><a href="https://t.me/Star_CinemaTm">{file_name}</a></b>"""
 
