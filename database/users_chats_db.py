@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 import pytz  
 import motor.motor_asyncio
 import bot_health
@@ -68,6 +69,14 @@ class Database:
 
     # ---------- "notify me when added" feature ----------
     async def add_movie_request(self, user_id: int, user_mention: str, query: str):
+        # Agar isi user ki isi movie ke liye pehle se request pending hai, to dubara save mat karo
+        # (varna movie upload hone pe user ko ek hi message multiple baar chala jaata hai)
+        existing = await self.movie_requests.find_one({
+            'user_id': user_id,
+            'query': {'$regex': f'^{re.escape(query.strip())}$', '$options': 'i'}
+        })
+        if existing:
+            return
         await self.movie_requests.insert_one({
             'user_id': user_id,
             'user_mention': user_mention,
