@@ -34,6 +34,7 @@ class Database:
         self.movie_updates = self.db.movie_updates
         self.connection = self.db.connections
         self.file_history = self.db.file_history  # /history feature
+        self.movie_requests = self.db.movie_requests  # "notify me when added" feature
         self._hist_idx_ready = False
 
     async def add_name(self, filename):
@@ -64,6 +65,22 @@ class Database:
 
     async def del_join_req(self):
         await self.req.drop()
+
+    # ---------- "notify me when added" feature ----------
+    async def add_movie_request(self, user_id: int, user_mention: str, query: str):
+        await self.movie_requests.insert_one({
+            'user_id': user_id,
+            'user_mention': user_mention,
+            'query': query,
+            'requested_at': datetime.datetime.utcnow()
+        })
+
+    async def get_all_movie_requests(self):
+        return await self.movie_requests.find({}).to_list(length=None)
+
+    async def delete_movie_request(self, request_id):
+        await self.movie_requests.delete_one({'_id': request_id})
+    # ---------- end ----------
 
     def new_user(self, id, name):
         return dict(
