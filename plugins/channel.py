@@ -12,8 +12,10 @@ from database.ia_filterdb import save_file
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from utils import temp
 from pymongo.errors import PyMongoError, DuplicateKeyError
-from pyrogram.errors import MessageIdInvalid, MessageNotModified, FloodWait
+from pyrogram.errors import MessageIdInvalid, MessageNotModified, FloodWait, UserIsBlocked, InputUserDeactivated, PeerIdInvalid
 from typing import Optional, Tuple
+from urllib.parse import quote_plus
+from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,42 @@ def extract_season_episode(filename: str) -> Tuple[Optional[int], Optional[str]]
                 ep = m.group(2)
             return season, ep
     return None, None
+
+async def notify_pending_requesters(bot, file_name):
+    """"Notify me when added" feature: checks the newly saved file's name against
+    everyone's pending not-found requests, and PMs anyone whose request now matches."""
+    pending = await db.get_all_movie_requests()
+    if not pending:
+        return
+    clean_name = normalize(clean_mentions_links(file_name)).lower()
+    for req in pending:
+        query_text = (req.get('query') or '').strip().lower()
+        if not query_text:
+            continue
+        score = fuzz.partial_ratio(query_text, clean_name)
+        if score < 75:
+            continue
+        try:
+            encoded = quote_plus(req['query'])[:50]
+            await bot.send_message(
+                chat_id=req['user_id'],
+                text=script.MOVIE_REQUEST_FOUND.format(req.get('user_mention', 'ᴜsᴇʀ'), req['query']),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔎 Dᴇᴋʜᴏ Aʙʜɪ", callback_data=f"notifyme_search#{encoded}")]
+                ]),
+                parse_mode=enums.ParseMode.HTML
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+        except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid):
+            pass
+        except Exception:
+            logger.exception("Could not notify user %s for movie request", req.get('user_id'))
+        finally:
+            try:
+                await db.delete_movie_request(req['_id'])
+            except Exception:
+                logger.exception("Could not delete fulfilled movie request %s", req.get('_id'))
 
 def schedule_update(bot, base_name, delay=5):
     if handle := pending_updates.get(base_name):
@@ -263,6 +301,11 @@ async def media_handler(bot, message):
     success, info = await save_file(media)
     if not success:
         return
+
+    try:
+        await notify_pending_requesters(bot, media.file_name)
+    except Exception:
+        logger.exception("Error in notify_pending_requesters")
 
     try:
         if await db.movie_update_status(bot.me.id):

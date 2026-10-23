@@ -3,7 +3,7 @@ import bot_health
 from utils import get_random_mix_id, get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, get_settings_text
 from rapidfuzz import process
 from dreamxbotz.util.file_properties import get_name, get_hash
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, unquote_plus
 
 from database.ia_filterdb import Media, Media2, get_search_results, get_bad_files
 from database.config_db import mdb
@@ -374,11 +374,35 @@ async def advantage_spoll_choker(bot, query):
                 await bot.send_message(chat_id=BIN_CHANNEL, text=script.NORSLTS.format(reqstr.id, reqstr.mention, movie))
             except Exception as e:
                 logger.error("Error In Spol: %s — Make Sure Bot Admin BIN CHANNEL", e)
+        try:
+            await db.add_movie_request(reqstr.id, reqstr.mention, movie)
+        except Exception as e:
+            logger.error("Could not save movie request for notify-me feature: %s", e)
         btn = InlineKeyboardMarkup(
             [[InlineKeyboardButton("🔰Cʟɪᴄᴋ ʜᴇʀᴇ & ʀᴇǫᴜᴇsᴛ ᴛᴏ ᴀᴅᴍɪɴ🔰", url=OWNER_LNK)]])
         k = await query.message.edit(script.MVE_NT_FND, reply_markup=btn)
         await asyncio.sleep(10)
         await k.delete()
+
+@Client.on_callback_query(filters.regex(r"^notifyme_search#"))
+async def notifyme_search_cb(bot, query):
+    search = unquote_plus(query.data.split("#", 1)[1])
+    try:
+        await query.answer("🔎 Searching...")
+    except Exception:
+        pass
+    files, offset, total_results = await get_search_results(query.message.chat.id, search, offset=0, filter=True)
+    if files:
+        query.message.from_user = query.from_user  # this message has no real sender; make the clicking user the owner of the results
+        k = (search, files, offset, total_results)
+        await auto_filter(bot, query, k)
+    else:
+        try:
+            await query.message.reply_text(
+                f"<b>Hmm, '{search}' ᴀʙʜɪ ɴᴀʜɪ ᴍɪʟ ʀᴀʜɪ. Tʜᴏᴅᴀ ᴀʟᴀɢ ɴᴀᴀᴍ sᴇ ᴅᴏʙᴀʀᴀ sᴇᴀʀᴄʜ ᴋᴀʀᴋᴇ ᴛʀʏ ᴋᴀʀᴏ.</b>"
+            )
+        except Exception:
+            pass
 
 # Qualities
 @Client.on_callback_query(filters.regex(r"^qualities#"))
@@ -1527,7 +1551,7 @@ async def auto_filter(client, msg, spoll=False):
             else:
                 return
         else:
-            message = msg.message.reply_to_message
+            message = msg.message.reply_to_message or msg.message
             search, files, offset, total_results = spoll
             m = await message.reply_text(f'🔎 sᴇᴀʀᴄʜɪɴɢ {search}', reply_to_message_id=message.id)
             settings = await get_settings(message.chat.id)
