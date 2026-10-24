@@ -49,16 +49,18 @@ async def broadcast_users(bot, message):
     total_users = len(users)
     dreamxbotz_status_msg = await message.reply_text("📤 <b>Broadcasting your message...</b>")
     success = blocked = deleted = failed = 0
+    blocked_list = []
+    deleted_list = []
     start_time = time.time()
     cancelled = False
 
     async def send(user):
         try:
             _, result = await users_broadcast(int(user["id"]), b_msg, is_pin)
-            return result
+            return user, result
         except Exception:
             logger.exception(f"Error sending broadcast to {user['id']}")
-            return "Error"
+            return user, "Error"
 
     async with lock:
         for i in range(0, total_users, 100):
@@ -69,13 +71,15 @@ async def broadcast_users(bot, message):
             batch = users[i:i + 100]
             results = await asyncio.gather(*[send(user) for user in batch])
 
-            for res in results:
+            for user, res in results:
                 if res == "Success":
                     success += 1
                 elif res == "Blocked":
                     blocked += 1
+                    blocked_list.append(f"{user.get('name', 'Unknown')} — {user['id']}")
                 elif res == "Deleted":
                     deleted += 1
+                    deleted_list.append(f"{user.get('name', 'Unknown')} — {user['id']}")
                 elif res == "Error":
                     failed += 1
 
@@ -105,6 +109,20 @@ async def broadcast_users(bot, message):
         f"❌ Failed: <code>{failed}</code>"
     )
     await dreamxbotz_status_msg.edit(final_status)
+
+    if blocked_list or deleted_list:
+        lines = []
+        if blocked_list:
+            lines.append(f"⛔ BLOCKED ({len(blocked_list)}):\n" + "\n".join(blocked_list))
+        if deleted_list:
+            lines.append(f"\n\n🗑️ DELETED ACCOUNT ({len(deleted_list)}):\n" + "\n".join(deleted_list))
+        file_path = "blocked_deleted_users.txt"
+        with open(file_path, "w+", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        try:
+            await message.reply_document(file_path, caption="📋 <b>Blocked / Deleted users list</b>", parse_mode=enums.ParseMode.HTML)
+        finally:
+            os.remove(file_path)
 
 
 @Client.on_message(filters.command("grp_broadcast") & filters.user(ADMINS) & filters.private)
@@ -189,13 +207,17 @@ async def remove_junkuser__db(bot, message):
     deleted = 0
     failed = 0
     done = 0
+    blocked_list = []
+    deleted_list = []
     async for user in users:
         pti, sh = await clear_junk(int(user['id']), b_msg)
         if not pti:
             if sh == "Blocked":
                 blocked+=1
+                blocked_list.append(f"{user.get('name', 'Unknown')} — {user['id']}")
             elif sh == "Deleted":
                 deleted += 1
+                deleted_list.append(f"{user.get('name', 'Unknown')} — {user['id']}")
             elif sh == "Error":
                 failed += 1
         done += 1
@@ -204,6 +226,20 @@ async def remove_junkuser__db(bot, message):
     time_taken = datetime.timedelta(seconds=int(time.time()-start_time))
     await sts.delete()
     await bot.send_message(message.chat.id, f"Completed:\nCompleted in {time_taken} seconds.\n\nTotal Users {total_users}\nCompleted: {done} / {total_users}\nBlocked: {blocked}\nDeleted: {deleted}")
+
+    if blocked_list or deleted_list:
+        lines = []
+        if blocked_list:
+            lines.append(f"⛔ BLOCKED ({len(blocked_list)}):\n" + "\n".join(blocked_list))
+        if deleted_list:
+            lines.append(f"\n\n🗑️ DELETED ACCOUNT ({len(deleted_list)}):\n" + "\n".join(deleted_list))
+        file_path = "clear_junk_users.txt"
+        with open(file_path, "w+", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        try:
+            await message.reply_document(file_path, caption="📋 <b>Blocked / Deleted users list</b>", parse_mode=enums.ParseMode.HTML)
+        finally:
+            os.remove(file_path)
 
 @Client.on_message(filters.command(["junk_group", "clear_junk_group"]) & filters.user(ADMINS))
 async def junk_clear_group(bot, message):
