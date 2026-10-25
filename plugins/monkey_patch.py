@@ -379,6 +379,9 @@ async def custom_copy(
         elif self.document:
             file_id = self.document.file_id
         elif self.video:
+            if caption is None:
+                caption = self.caption or ""
+                caption_entities = self.caption_entities
             return await self._client.send_video(
                 chat_id,
                 video=self.video.file_id,
