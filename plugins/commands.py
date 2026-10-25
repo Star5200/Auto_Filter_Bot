@@ -42,6 +42,19 @@ async def _delete_after(msg, seconds):
         logger.warning("start sticker auto-delete error: %s", e)
 
 
+@Client.on_chat_member_updated()
+async def bot_removed_from_group(client, chat_member_updated):
+    new_member = chat_member_updated.new_chat_member
+    if not new_member or not new_member.user or new_member.user.id != client.me.id:
+        return  # this update isn't about the bot's own membership
+    if new_member.status in (enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED):
+        try:
+            await db.delete_chat(chat_member_updated.chat.id)
+            logger.info(f"Bot removed from group {chat_member_updated.chat.id} ({chat_member_updated.chat.title}) — removed from DB")
+        except Exception as e:
+            logger.warning("Could not remove group from DB after bot was removed: %s", e)
+
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     try:
@@ -1492,3 +1505,43 @@ async def clean_groups_handler(client, message):
         except Exception as e:
             logger.error("Error in clean_groups loop: %s", e)
     await msg.edit(f'**Clean Groups Complete**\n\nTotal Processed: {processed}\nDeleted: {deleted_count}')
+
+
+@Client.on_message(filters.command('grouplist') & filters.user(ADMINS))
+async def group_list_handler(client, message):
+    msg = await message.reply('Fetching group list... This may take a while.', quote=True)
+    total_groups = await db.total_chat_count()
+    chats = await db.get_all_chats()
+    lines = []
+    processed = 0
+    async for chat in chats:
+        processed += 1
+        chat_id = chat['id']
+        title = chat.get('title', 'Unknown')
+        try:
+            link = await client.export_chat_invite_link(chat_id)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            try:
+                link = await client.export_chat_invite_link(chat_id)
+            except Exception:
+                link = "⚠️ Link nahi mila (bot admin nahi hai ya permission missing)"
+        except Exception:
+            link = "⚠️ Link nahi mila (bot admin nahi hai ya permission missing)"
+        lines.append(f"{processed}. {title}\nID: {chat_id}\nLink: {link}\n")
+        if processed % 10 == 0:
+            try:
+                await msg.edit(f'Progress: {processed}/{total_groups}')
+            except Exception:
+                pass
+    await msg.delete()
+    if not lines:
+        await message.reply("Bot abhi kisi bhi group mein nahi hai.")
+        return
+    file_path = "group_list.txt"
+    with open(file_path, "w+", encoding="utf-8") as f:
+        f.write(f"Total Groups: {len(lines)}\n\n" + "\n".join(lines))
+    try:
+        await message.reply_document(file_path, caption=f"📋 <b>Group List ({len(lines)} groups)</b>", parse_mode=enums.ParseMode.HTML)
+    finally:
+        os.remove(file_path)
