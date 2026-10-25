@@ -87,8 +87,9 @@ class Database:
     async def get_all_movie_requests(self):
         return await self.movie_requests.find({}).to_list(length=None)
 
-    async def delete_movie_request(self, request_id):
-        await self.movie_requests.delete_one({'_id': request_id})
+    async def delete_movie_request(self, request_id) -> bool:
+        result = await self.movie_requests.delete_one({'_id': request_id})
+        return result.deleted_count > 0
     # ---------- end ----------
 
     def new_user(self, id, name):
