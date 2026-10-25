@@ -385,7 +385,7 @@ async def custom_copy(
                 caption=caption,
                 parse_mode=parse_mode,
                 caption_entities=caption_entities,
-                invert_media=invert_media or self.invert_media,  # type: ignore
+                invert_media=invert_media or getattr(self, 'invert_media', False),  # type: ignore
                 cover=video_cover,  # type: ignore
                 has_spoiler=self.has_media_spoiler,
                 disable_notification=disable_notification,

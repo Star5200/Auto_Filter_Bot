@@ -138,6 +138,18 @@ async def notify_pending_requesters(bot, file_name):
         score = fuzz.partial_ratio(query_text, clean_name)
         if score < 75:
             continue
+        # Claim this request FIRST (atomic delete). If another concurrent upload
+        # (e.g. a second quality/print of the same movie arriving at nearly the
+        # same time) already claimed it, deleted_count will be 0 here and we
+        # skip sending — this is what prevents the same user getting notified
+        # multiple times for one request.
+        try:
+            claimed = await db.delete_movie_request(req['_id'])
+        except Exception:
+            logger.exception("Could not claim movie request %s", req.get('_id'))
+            continue
+        if not claimed:
+            continue
         try:
             encoded = quote_plus(req['query'])[:50]
             await bot.send_message(
@@ -154,11 +166,6 @@ async def notify_pending_requesters(bot, file_name):
             pass
         except Exception:
             logger.exception("Could not notify user %s for movie request", req.get('user_id'))
-        finally:
-            try:
-                await db.delete_movie_request(req['_id'])
-            except Exception:
-                logger.exception("Could not delete fulfilled movie request %s", req.get('_id'))
 
 def schedule_update(bot, base_name, delay=5):
     if handle := pending_updates.get(base_name):
