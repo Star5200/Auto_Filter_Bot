@@ -6,9 +6,9 @@ from collections import defaultdict
 from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
-from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER
+from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, ADMINS
 from Script import script
-from database.ia_filterdb import save_file
+from database.ia_filterdb import save_file, get_bad_files
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from utils import temp
 from pymongo.errors import PyMongoError, DuplicateKeyError
@@ -123,6 +123,29 @@ def extract_season_episode(filename: str) -> Tuple[Optional[int], Optional[str]]
                 ep = m.group(2)
             return season, ep
     return None, None
+
+@Client.on_message(filters.command("announce") & filters.user(ADMINS))
+async def announce_movie_update(bot, message):
+    try:
+        query = message.text.split(" ", 1)[1].strip()
+    except IndexError:
+        await message.reply_text("<b>Movie ka naam bhi likho command ke saath, jaise:</b> <code>/announce Mirzapur</code>")
+        return
+    sts = await message.reply_text(f"<b>🔎 '{query}' ko database mein dhoondh raha hoon...</b>")
+    files, total = await get_bad_files(query)
+    if not files:
+        await sts.edit(f"<b>❌ '{query}' database mein nahi mili. Pehle isko upload/index karo.</b>")
+        return
+    f = files[0]
+    file_name = getattr(f, "file_name", "")
+    caption = getattr(f, "caption", None) or ""
+    try:
+        await process_and_send_update(bot, file_name, caption)
+        await sts.edit(f"<b>✅ '{query}' Update Channel mein post ho gayi!</b>")
+    except Exception as e:
+        logger.exception("Error in /announce")
+        await sts.edit(f"<b>❗ Kuch galat ho gaya: {e}</b>")
+
 
 async def notify_pending_requesters(bot, file_name):
     """"Notify me when added" feature: checks the newly saved file's name against
