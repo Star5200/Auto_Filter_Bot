@@ -354,8 +354,10 @@ async def process_and_send_update(bot, filename, caption):
             await _process_with_lock(bot, filename, caption, media_info, base_name, processed)
     except PyMongoError as e:
         logger.error(f"Database error in process_and_send_update: {e}")
+        raise
     except Exception as e:
         logger.exception(f"Processing failed in process_and_send_update: {e}")
+        raise
 
 async def _process_with_lock(bot, filename, caption, media_info, base_name, processed):
     if not hasattr(db, 'movie_updates'):
