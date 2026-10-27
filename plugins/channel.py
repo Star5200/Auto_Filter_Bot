@@ -128,24 +128,41 @@ def extract_season_episode(filename: str) -> Tuple[Optional[int], Optional[str]]
 @Client.on_message(filters.command("announce") & filters.user(ADMINS))
 async def announce_movie_update(bot, message):
     try:
-        query = message.text.split(" ", 1)[1].strip()
+        raw = message.text.split(" ", 1)[1].strip()
     except IndexError:
-        await message.reply_text("<b>Movie ka naam bhi likho command ke saath, jaise:</b> <code>/announce Mirzapur</code>")
+        await message.reply_text(
+            "<b>Movie ka naam likho command ke saath, jaise:</b>\n"
+            "<code>/announce Mirzapur</code>\n\n"
+            "<b>Ek se zyada movies ek saath karni hon, to har naam nayi line pe likho:</b>\n"
+            "<code>/announce\nMirzapur\nHercai\nSingham Again</code>"
+        )
         return
-    sts = await message.reply_text(f"<b>🔎 '{query}' ko database mein dhoondh raha hoon...</b>")
-    files, total = await get_bad_files(query)
-    if not files:
-        await sts.edit(f"<b>❌ '{query}' database mein nahi mili. Pehle isko upload/index karo.</b>")
-        return
-    f = files[0]
-    file_name = getattr(f, "file_name", "")
-    caption = getattr(f, "caption", None) or ""
-    try:
-        await process_and_send_update(bot, file_name, caption)
-        await sts.edit(f"<b>✅ '{query}' Update Channel mein post ho gayi!</b>")
-    except Exception as e:
-        logger.exception("Error in /announce")
-        await sts.edit(f"<b>❗ Kuch galat ho gaya: {e}</b>")
+    queries = [q.strip() for q in raw.split("\n") if q.strip()]
+    sts = await message.reply_text(f"<b>🔎 {len(queries)} movie(s) process ho rahi hain...</b>")
+    posted, not_found, failed = [], [], []
+    for query in queries:
+        files, total = await get_bad_files(query)
+        if not files:
+            not_found.append(query)
+            continue
+        f = files[0]
+        file_name = getattr(f, "file_name", "")
+        caption = getattr(f, "caption", None) or ""
+        try:
+            await process_and_send_update(bot, file_name, caption)
+            posted.append(query)
+        except Exception as e:
+            logger.exception("Error in /announce for %s", query)
+            failed.append(query)
+
+    result_lines = []
+    if posted:
+        result_lines.append(f"<b>✅ Posted ({len(posted)}):</b>\n" + "\n".join(f"• {q}" for q in posted))
+    if not_found:
+        result_lines.append(f"<b>❌ Database mein nahi mili ({len(not_found)}):</b>\n" + "\n".join(f"• {q}" for q in not_found))
+    if failed:
+        result_lines.append(f"<b>❗ Error aaya ({len(failed)}):</b>\n" + "\n".join(f"• {q}" for q in failed))
+    await sts.edit("\n\n".join(result_lines))
 
 
 async def notify_pending_requesters(bot, file_name):
