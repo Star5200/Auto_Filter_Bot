@@ -209,7 +209,9 @@ def extract_media_info(filename: str, caption: str):
     season = episode = year = None
     tag = "#MOVIE"
     processed_raw = base_raw = filename
-    quality = get_qualities(caption_clean) or get_qualities(filename.lower()) or "N/A"
+    quality = get_qualities(caption_clean)
+    if quality == "N/A":
+        quality = get_qualities(filename.lower())
     ott_platform = extract_ott_platform(f"{filename} {caption_clean}")
 
     lang_keys = {k for k in CAPTION_LANGUAGES if k in caption_clean or k in filename.lower()}
@@ -425,7 +427,7 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
                     {"$push": {"files": file_data}}
                 )
                 movie_doc["files"].append(file_data)
-                schedule_update(bot, base_name)
+                await update_movie_message(bot, base_name)
     else:
         if any(f["filename"] == filename for f in movie_doc["files"]):
             return
@@ -434,7 +436,7 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             {"$push": {"files": file_data}}
         )
         movie_doc["files"].append(file_data)
-        schedule_update(bot, base_name)
+        await update_movie_message(bot, base_name)
 
 async def send_movie_update(bot, base_name):
     max_retries = 3
