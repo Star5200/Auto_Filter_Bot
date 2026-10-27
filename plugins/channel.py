@@ -80,6 +80,7 @@ QUALITY_PATTERN = re.compile(
     re.IGNORECASE
 )
 YEAR_PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:19|20)\d{2}(?![A-Za-z0-9])")
+RESOLUTION_TERMS = {"360p", "480p", "720p", "1080p", "2160p", "4k", "1440p", "540p", "240p", "140p"}
 RANGE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,2})\s*(?:to|-)\s*(?:E(?:p(?:isode)?)?)?0*(\d{1,2})',re.IGNORECASE)
 SINGLE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})', re.IGNORECASE)
 NAMED_REGEX = re.compile(r'Season\s*0*(\d{1,2})[\s\-,:]*Ep(?:isode)?\s*0*(\d{1,3})', re.IGNORECASE)
@@ -398,6 +399,8 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             "files": [file_data],
             "poster_url": details.get("backdrop_url") if LANDSCAPE_POSTER and TMDB_POSTER and details.get("backdrop_url") and not error_tmdb else details.get("poster_url"),
             "genres": genres,
+            "cast": details.get("cast") or "N/A",
+            "story": details.get("plot") or "N/A",
             "rating": details.get("rating", "N/A"),
             "imdb_url": details.get("url", "")if not TMDB_POSTER or error_tmdb else details.get("tmdb_url"),
             "year": details.get("year") or media_info["year"],
@@ -444,11 +447,11 @@ async def send_movie_update(bot, base_name):
             text = generate_movie_message(movie_doc, base_name)
             buttons = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    'ɢᴇᴛ ғɪʟᴇs',
+                    '❗ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ɢᴇᴛ ғɪʟᴇ ❗',
                     url=f"https://t.me/{temp.U_NAME}?start=getfile-{base_name.replace(' ', '-')}"
                 )
             ]])
-            size=(2560, 1440) if LANDSCAPE_POSTER and TMDB_POSTER and movie_doc.get("is_backdrop") and not movie_doc.get("error_tmdb") else (853, 1280)
+            size=(2560, 1440) if LANDSCAPE_POSTER else (853, 1280)
             if movie_doc.get("poster_url") and not LINK_PREVIEW:
                 resized_poster = await fetch_image(movie_doc["poster_url"], size)
                 if resized_poster:
@@ -505,7 +508,7 @@ async def update_movie_message(bot, base_name):
         text = generate_movie_message(movie_doc, base_name)
         buttons = InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                'ɢᴇᴛ ғɪʟᴇs',
+                '❗ ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ɢᴇᴛ ғɪʟᴇ ❗',
                 url=f"https://t.me/{temp.U_NAME}?start=getfile-{base_name.replace(' ', '-')}"
             )
         ]])
@@ -579,9 +582,9 @@ def generate_movie_message(movie_doc, base_name):
             episodes_by_season[season].add(episode)
 
     primary_tag = "#SERIES" if "#SERIES" in all_tags else "#MOVIE"
-    epi_block = ""
+    season_episode_block = ""
     if episodes_by_season:
-        episode_lines = []
+        season_lines = []
         for season, episodes in sorted(episodes_by_season.items(), key=lambda x: int(x[0])):
             singles = []
             ranges = []
@@ -610,17 +613,28 @@ def generate_movie_message(movie_doc, base_name):
                 collapsed.append(str(start) if start == end else f"{start}-{end}")
 
             all_ep_parts = collapsed + sorted(ranges, key=lambda s: int(s.split("-")[0]))
-            episode_lines.append(f"S{int(season)}: {', '.join(all_ep_parts)}")
-
-        epi_str = "\n".join(episode_lines)
-        if epi_str:
-            epi_block = f"📺 ᴇᴘɪsᴏᴅᴇs : <b>\n{epi_str}</b>"
+            episode_str = ", ".join(all_ep_parts)
+            season_lines.append(
+                f"☀️ Sᴇᴀsᴏɴ : <b>S{int(season):02d}</b>\n📄 Eᴘɪsᴏᴅᴇ : <b>{episode_str}</b>"
+            )
+        if season_lines:
+            season_episode_block = "\n".join(season_lines) + "\n"
 
     genres = movie_doc.get("genres", "N/A")
-    quality_str = ", ".join(sorted(all_qualities)) if all_qualities else "N/A"
+    cast = movie_doc.get("cast") or "N/A"
+    story = movie_doc.get("story") or "N/A"
+
+    # Split the combined quality matches into resolution-only (Quality) and
+    # source/format-only (Format) buckets, e.g. "720p, WEB-DL, HEVC" ->
+    # Quality: 720p | Format: WEB-DL, HEVC
+    resolutions, formats = set(), set()
+    for q in all_qualities:
+        (resolutions if q.lower() in RESOLUTION_TERMS else formats).add(q)
+    quality_str = " + ".join(sorted(resolutions, key=lambda s: int(re.sub(r'\D', '', s) or 0))) if resolutions else "N/A"
+    format_str = ", ".join(sorted(formats)) if formats else "N/A"
+
     language_str = ", ".join(sorted(all_languages)) if all_languages else "N/A"
-    ott_str = ", ".join(sorted(all_ott_platforms)) if all_ott_platforms else "N/A"
-    rating=movie_doc.get("rating", "-")
+    rating = movie_doc.get("rating", "-")
     try:
         r = float(rating)
     except (TypeError, ValueError):
@@ -638,10 +652,11 @@ def generate_movie_message(movie_doc, base_name):
         tag=primary_tag,
         year=year_val,
         genres=genres,
-        ott=ott_str,
+        cast=cast,
+        story=story,
         quality=quality_str,
+        format=format_str,
         language=language_str,
-        episodes=epi_block,
+        season_episode_block=season_episode_block,
         rating=rating_text,
-        search_link=temp.B_LINK
 )
