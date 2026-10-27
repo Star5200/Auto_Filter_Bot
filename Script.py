@@ -278,21 +278,20 @@ Aᴀᴘɴᴇ ᴊᴏ <b>{}</b> ʀᴇQᴜᴇsᴛ ᴋɪ ᴛʜɪ, ᴡᴏ ᴀʙ ᴅ�
     CAPTION = """<b><a href="https://t.me/Star_CinemaTm">{file_name}</a></b>"""
 
     
-    MOVIE_UPDATE_NOTIFY_TXT = """
-</b><a href={poster_url}>📥</a><a href={imdb_url}>New {tag} Added</a></b>
+    MOVIE_UPDATE_NOTIFY_TXT = """<a href={poster_url}>‎</a><a href={imdb_url}>‎</a><blockquote>✅ <b>{filename} {year} {tag}</b></blockquote>
 
-<blockquote>✨ ᴛɪᴛʟᴇ : <code>{filename} {year}</code>
+――――――――――――
 
-🎭 ɢᴇɴʀᴇs : <b>{genres}</b>
-📺 ᴏᴛᴛ        : <b>{ott}</b>
-🎞️ ǫᴜᴀʟɪᴛʏ : <b>{quality}</b>
-🎧 ᴀᴜᴅɪᴏ    : <b>{language}</b>
-🔥 ʀᴀᴛɪɴɢ   : <b>{rating}</b>
-{episodes}
-</blockquote>
+{season_episode_block}🔊 Aᴜᴅɪᴏ : <b>{language}</b>
+🌿 Qᴜᴀʟɪᴛʏ : <b>{quality}</b>
+📌 Fᴏʀᴍᴀᴛ : <b>{format}</b>
 
-🔍 <b>Sᴇᴀʀᴄʜ →</b> {search_link}
-"""
+――――――――――――
+
+<blockquote expandable>⭐ Rᴀᴛɪɴɢ : <b>{rating}/10</b>
+🎭 Gᴇɴʀᴇs : <b>{genres}</b>
+👥 Cᴀsᴛ : <b>{cast}</b>
+📜 Sᴛᴏʀʏ : {story}</blockquote>"""
 
 
     IMDB_TEMPLATE_TXT = """<b><a href={url}>{title} (<a href={url}/releaseinfo>{year}</a>)
