@@ -585,104 +585,55 @@ import asyncio
 from pyrogram.types import Message
 import pyrogram
 
-# ── Global patch: Message.copy() uses web_page_preview which was removed in
-#    Pyrogram v2 / Kurigram. Inject it as None before every copy() call.
-if not getattr(Message, "_copy_patched", False):
-    Message._copy_patched = True
-    _original_copy = Message.copy
-    async def _patched_copy(self, *args, **kwargs):
-        if not hasattr(self, "web_page_preview"):
-            self.web_page_preview = None
-        return await _original_copy(self, *args, **kwargs)
-    Message.copy = _patched_copy
-
-if not getattr(Message, "_listen_patched", False):
-    Message._listen_patched = True
-    Message._original_parse = Message._parse
-
-    @staticmethod
-    async def _custom_parse(client, message, users, chats, *args, **kwargs):
-        msg = await Message._original_parse(client, message, users, chats, *args, **kwargs)
-        if hasattr(client, "listen_futures"):
-            chat_id = getattr(getattr(msg, "chat", None), "id", None)
-            user_id = getattr(getattr(msg, "from_user", None), "id", None)
-            key = (chat_id, user_id)
-            key_chat = (chat_id, None)
-
-            if key in client.listen_futures:
-                future = client.listen_futures.pop(key)
-                if not future.done():
-                    future.set_result(msg)
-                raise pyrogram.StopPropagation
-                
-            if key_chat in client.listen_futures:
-                future = client.listen_futures.pop(key_chat)
-                if not future.done():
-                    future.set_result(msg)
-                raise pyrogram.StopPropagation      
-        return msg
-    Message._parse = _custom_parse
-
-
-async def custom_listen(self, chat_id, filters=None, timeout=60, user_id=None):
-    if not hasattr(self, "listen_futures"):
-        self.listen_futures = {} 
-    future = asyncio.get_running_loop().create_future()
-    if user_id:
-        key = (chat_id, user_id)
-    else:
-        key = (chat_id, None)
-     
-    self.listen_futures[key] = future
-    try:
-        if timeout:
-            message = await asyncio.wait_for(future, timeout=timeout)
-        else:
-            message = await future 
-        if filters:
-            if not await filters(self, message):
-                return await self.listen(chat_id, filters, timeout, user_id)       
-        return message
-    except asyncio.TimeoutError:
-        self.listen_futures.pop(key, None)
-        raise
-
-pyrogram.Client.listen = custom_listen
-
-# ── Global patch: newer Kurigram removed the `quote=` kwarg from every
-#    Message.reply*() method. Translate it so old code keeps working.
-import inspect as _inspect
+# ── Global compatibility patch for newer Kurigram ───────────────────────────
+#    New versions removed `quote=`, `reply_to_message_id=` and
+#    `disable_web_page_preview=` from Message.reply*() / edit_text() etc.
+#    Instead of guessing the library version, we call normally; if the library
+#    complains about an unknown keyword we convert it to the new style and retry.
+import re as _re
 import functools as _functools
 
-def _patch_reply_quote():
-    for _name in dir(Message):
-        if not _name.startswith("reply"):
-            continue
-        _orig = getattr(Message, _name, None)
-        if not callable(_orig) or getattr(_orig, "_quote_patched", False):
-            continue
-        try:
-            _params = _inspect.signature(_orig).parameters
-        except (TypeError, ValueError):
-            continue
-        if "quote" in _params:
-            continue  # this library version still supports it natively
+def _make_compat(orig):
+    @_functools.wraps(orig)
+    async def wrapper(self, *args, **kwargs):
+        kw = dict(kwargs)
+        for _ in range(8):
+            try:
+                return await orig(self, *args, **kw)
+            except TypeError as e:
+                m = _re.search(r"unexpected keyword argument '(\w+)'", str(e))
+                if not m or m.group(1) not in kw:
+                    raise
+                bad = m.group(1)
+                val = kw.pop(bad)
+                if bad in ("quote", "reply_to_message_id"):
+                    target = (getattr(self, "id", None) if bad == "quote" else val) if val else None
+                    if target and "reply_parameters" not in kw and "do_quote" not in kw:
+                        kw["reply_parameters"] = types.ReplyParameters(message_id=target)
+                elif bad == "reply_parameters":
+                    if getattr(val, "message_id", None) == getattr(self, "id", object()):
+                        kw.setdefault("do_quote", True)
+                elif bad == "disable_web_page_preview":
+                    if "link_preview_options" not in kw:
+                        kw["link_preview_options"] = types.LinkPreviewOptions(is_disabled=bool(val))
+                elif bad == "do_quote":
+                    pass  # not supported -> just send without quoting
+                else:
+                    raise
+        return await orig(self, *args, **kw)
+    wrapper._compat_patched = True
+    return wrapper
 
-        def _make(orig, params):
-            @_functools.wraps(orig)
-            async def wrapper(self, *args, **kwargs):
-                if "quote" in kwargs:
-                    q = kwargs.pop("quote")
-                    if q:
-                        if "do_quote" in params:
-                            kwargs.setdefault("do_quote", True)
-                        elif "reply_to_message_id" in params:
-                            kwargs.setdefault("reply_to_message_id", self.id)
-                return await orig(self, *args, **kwargs)
-            wrapper._quote_patched = True
-            return wrapper
+def _patch_compat():
+    from pyrogram.types import Message as _Msg
+    for _name in dir(_Msg):
+        if _name.startswith("reply") or _name in ("edit", "edit_text"):
+            _orig = getattr(_Msg, _name, None)
+            if callable(_orig) and not getattr(_orig, "_compat_patched", False):
+                setattr(_Msg, _name, _make_compat(_orig))
+    for _name in ("send_message", "edit_message_text"):
+        _orig = getattr(Client, _name, None)
+        if callable(_orig) and not getattr(_orig, "_compat_patched", False):
+            setattr(Client, _name, _make_compat(_orig))
 
-        setattr(Message, _name, _make(_orig, _params))
-
-_patch_reply_quote()
-
+_patch_compat()
