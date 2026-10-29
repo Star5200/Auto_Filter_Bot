@@ -154,8 +154,29 @@ async def announce_movie_update(bot, message):
             existing = await db.movie_updates.find_one({"_id": base_name})
             if existing:
                 # Already tracked in DB (e.g. its old channel post was deleted
-                # manually) — force a brand new post instead of silently
-                # no-op'ing like the automatic flow does.
+                # manually, or it was indexed with an older/buggy version of
+                # the parsing logic) — re-derive every file's quality/episode
+                # info fresh from its stored filename before re-posting, so
+                # old bad data gets corrected too, not just re-displayed.
+                refreshed_files = []
+                for old_file in existing.get("files", []):
+                    fn = old_file.get("filename", "")
+                    info = extract_media_info(fn, "")
+                    refreshed_files.append({
+                        "filename": fn,
+                        "processed": info["processed"],
+                        "quality": info["quality"],
+                        "language": info["language"],
+                        "ott_platform": info["ott_platform"],
+                        "timestamp": old_file.get("timestamp", datetime.now()),
+                        "tag": info["tag"],
+                        "season": info["season"],
+                        "episode": info["episode"],
+                    })
+                await db.movie_updates.update_one(
+                    {"_id": base_name},
+                    {"$set": {"files": refreshed_files}}
+                )
                 await send_movie_update(bot, base_name)
             else:
                 await process_and_send_update(bot, file_name, caption)
