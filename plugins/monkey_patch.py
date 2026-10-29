@@ -648,3 +648,41 @@ async def custom_listen(self, chat_id, filters=None, timeout=60, user_id=None):
         raise
 
 pyrogram.Client.listen = custom_listen
+
+# ── Global patch: newer Kurigram removed the `quote=` kwarg from every
+#    Message.reply*() method. Translate it so old code keeps working.
+import inspect as _inspect
+import functools as _functools
+
+def _patch_reply_quote():
+    for _name in dir(Message):
+        if not _name.startswith("reply"):
+            continue
+        _orig = getattr(Message, _name, None)
+        if not callable(_orig) or getattr(_orig, "_quote_patched", False):
+            continue
+        try:
+            _params = _inspect.signature(_orig).parameters
+        except (TypeError, ValueError):
+            continue
+        if "quote" in _params:
+            continue  # this library version still supports it natively
+
+        def _make(orig, params):
+            @_functools.wraps(orig)
+            async def wrapper(self, *args, **kwargs):
+                if "quote" in kwargs:
+                    q = kwargs.pop("quote")
+                    if q:
+                        if "do_quote" in params:
+                            kwargs.setdefault("do_quote", True)
+                        elif "reply_to_message_id" in params:
+                            kwargs.setdefault("reply_to_message_id", self.id)
+                return await orig(self, *args, **kwargs)
+            wrapper._quote_patched = True
+            return wrapper
+
+        setattr(Message, _name, _make(_orig, _params))
+
+_patch_reply_quote()
+

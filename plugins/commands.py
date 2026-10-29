@@ -55,6 +55,30 @@ async def bot_removed_from_group(client, chat_member_updated):
             logger.warning("Could not remove group from DB after bot was removed: %s", e)
 
 
+async def auto_delete_file(msg):
+    """Send 'will be deleted' notice, wait DELETE_TIME, delete the file, update notice.
+    Runs as a background task so it never blocks other commands and never dies silently."""
+    k = None
+    try:
+        k = await msg.reply(
+            script.DEL_MSG.format(get_time(DELETE_TIME)),
+            quote=True,
+            parse_mode=enums.ParseMode.HTML
+        )
+    except Exception as e:
+        logger.exception(f"Delete notice failed: {e}")
+    await asyncio.sleep(DELETE_TIME)
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.exception(f"Auto delete failed: {e}")
+    if k:
+        try:
+            await k.edit_text("<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>")
+        except Exception:
+            pass
+
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     try:
@@ -450,10 +474,7 @@ async def start(client, message):
                         return
                 f_caption = add_lang_line(f_caption, file.file_name)
                 await msg.edit_caption(f_caption, reply_markup=InlineKeyboardMarkup(btn))
-                k = await msg.reply(script.DEL_MSG.format(get_time(DELETE_TIME)), quote=True, parse_mode=enums.ParseMode.HTML)
-                await asyncio.sleep(DELETE_TIME)
-                await msg.delete()
-                await k.edit_text("<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>")
+                asyncio.create_task(auto_delete_file(msg))
                 return
             except Exception as e:
                 logger.exception(e)
@@ -488,10 +509,7 @@ async def start(client, message):
         )
         asyncio.create_task(db.add_file_history(message.from_user.id, files.file_id, files.file_name, files.file_size, grp_id))
         
-        k = await msg.reply(script.DEL_MSG.format(get_time(DELETE_TIME)), quote=True, parse_mode=enums.ParseMode.HTML)
-        await asyncio.sleep(DELETE_TIME)
-        await msg.delete()
-        await k.edit_text("<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>")
+        asyncio.create_task(auto_delete_file(msg))
         return
     except StopPropagation:
         raise
