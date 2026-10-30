@@ -43,6 +43,37 @@ BUTTONS2 = {}
 SPELL_CHECK = {}
 
 
+def _visible_len(html_text: str) -> int:
+    """Approx. length Telegram counts for a caption (tags removed, entities decoded)."""
+    import html as _html
+    return len(_html.unescape(re.sub(r"<[^>]+>", "", html_text or "")))
+
+
+async def edit_caption_or_resend(query, cap, btn):
+    """Edit a photo caption. Telegram allows max 1024 chars in a caption; if the
+    page text is longer, replace the photo message with a normal text message
+    (limit 4096) so the Next/Back buttons keep working instead of failing."""
+    markup = InlineKeyboardMarkup(btn)
+    if _visible_len(cap) <= 1024:
+        try:
+            await query.message.edit_caption(caption=cap, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
+            return
+        except (MessageNotModified, MessageIdInvalid):
+            return
+        except Exception as e:
+            if "CAPTION_TOO_LONG" not in str(e).upper() and "MediaCaptionTooLong" not in type(e).__name__:
+                logger.exception(e)
+                return
+    try:
+        await query.message.reply_text(text=cap, reply_markup=markup, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        logger.exception(e)
+
+
 @Client.on_message(filters.group & filters.text & filters.incoming & ~filters.regex(r"^/") )
 async def give_filter(client, message):
     if EMOJI_MODE:
@@ -326,12 +357,7 @@ async def next_page(bot, query):
             if settings['imdb']:
                 cap = await get_cap(settings, remaining_seconds, files, query, total, dreamx_title, offset)
                 if query.message.caption:
-                    try:
-                        await query.message.edit_caption(caption=cap, reply_markup=InlineKeyboardMarkup(btn), parse_mode=enums.ParseMode.HTML)
-                    except (MessageNotModified, MessageIdInvalid):
-                        pass
-                    except Exception as e:
-                        logger.exception(e)
+                    await edit_caption_or_resend(query, cap, btn)
                 else:
                     try:
                         await query.message.edit_text(text=cap, reply_markup=InlineKeyboardMarkup(btn), disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
