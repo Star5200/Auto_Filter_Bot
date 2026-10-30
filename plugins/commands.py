@@ -303,17 +303,28 @@ async def start(client, message):
             grp_id = 0
             file_id = data
 
-        decoded_file_id = file_id
+        # NOTE: a normal file_id is itself url-safe base64 of binary data, and that
+        # binary data contains the byte "_" (0x5F) in ~6% of files. The old code always
+        # tried to "decode" the id first, which turned those files' ids into garbage and
+        # gave "No such file exists". Now: try the real id FIRST; only if it is not in
+        # the DB try the legacy decoded form.
+        alt_file_id = None
         if not data.startswith("allfiles"):
             try:
                 raw = base64.urlsafe_b64decode(file_id + "=" * (-len(file_id) % 4))
                 sep = raw.find(b"_")
                 if sep != -1:
-                    decoded_file_id = raw[sep + 1:].decode("latin1")
+                    alt_file_id = raw[sep + 1:].decode("latin1")
             except Exception:
                 pass
 
-        file_details_task = asyncio.create_task(get_file_details(decoded_file_id))
+        async def _lookup_file(fid, alt):
+            res = await get_file_details(fid)
+            if not res and alt and alt != fid:
+                res = await get_file_details(alt)
+            return res
+
+        file_details_task = asyncio.create_task(_lookup_file(file_id, alt_file_id))
         if not await db.has_premium_access(message.from_user.id): 
             try:
                 btn = []
@@ -441,44 +452,44 @@ async def start(client, message):
 
         settings = await get_settings(int(grp_id))
         if not files_:
-            raw = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
-            sep = raw.find(b"_")
-            if sep == -1:
-                raise ValueError("Invalid encoded data")
-            file_id = raw[sep + 1:].decode("latin1")
-            try:
-                cover = None
-                if COVERX:
-                    details = await get_file_details(file_id)
-                    cover = details[0].cover if details and details[0].cover else None
-                btn = await stream_buttons(message.from_user.id, file_id)
-                msg = await client.send_cached_media(
-                    chat_id=message.from_user.id,
-                    cover=cover,
-                    file_id=file_id,
-                    protect_content=settings.get('file_secure', PROTECT_CONTENT),
-                    reply_markup=InlineKeyboardMarkup(btn))
+            candidates = [file_id]
+            if alt_file_id and alt_file_id != file_id:
+                candidates.append(alt_file_id)
+            for cand in candidates:
+                file_id = cand
+                try:
+                    cover = None
+                    if COVERX:
+                        details = await get_file_details(file_id)
+                        cover = details[0].cover if details and details[0].cover else None
+                    btn = await stream_buttons(message.from_user.id, file_id)
+                    msg = await client.send_cached_media(
+                        chat_id=message.from_user.id,
+                        cover=cover,
+                        file_id=file_id,
+                        protect_content=settings.get('file_secure', PROTECT_CONTENT),
+                        reply_markup=InlineKeyboardMarkup(btn))
 
-                filetype = msg.media
-                file = getattr(msg, filetype.value)
-                title = clean_filename(file.file_name)
-                size=get_size(file.file_size)
-                asyncio.create_task(db.add_file_history(message.from_user.id, file_id, file.file_name, file.file_size, grp_id))
-                f_caption = f"<code>{title}</code>"
-                settings = await get_settings(int(grp_id))
-                DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
-                if DREAMX_CAPTION:
-                    try:
-                        f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='')
-                    except Exception:
-                        return
-                f_caption = add_lang_line(f_caption, file.file_name)
-                await msg.edit_caption(f_caption, reply_markup=InlineKeyboardMarkup(btn))
-                asyncio.create_task(auto_delete_file(msg))
-                return
-            except Exception as e:
-                logger.exception(e)
-                pass
+                    filetype = msg.media
+                    file = getattr(msg, filetype.value)
+                    title = clean_filename(file.file_name)
+                    size=get_size(file.file_size)
+                    asyncio.create_task(db.add_file_history(message.from_user.id, file_id, file.file_name, file.file_size, grp_id))
+                    f_caption = f"<code>{title}</code>"
+                    settings = await get_settings(int(grp_id))
+                    DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
+                    if DREAMX_CAPTION:
+                        try:
+                            f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='')
+                        except Exception:
+                            return
+                    f_caption = add_lang_line(f_caption, file.file_name)
+                    await msg.edit_caption(f_caption, reply_markup=InlineKeyboardMarkup(btn))
+                    asyncio.create_task(auto_delete_file(msg))
+                    return
+                except Exception as e:
+                    logger.exception(e)
+                    pass
             return await message.reply('ɴᴏ ꜱᴜᴄʜ ꜰɪʟᴇ ᴇxɪꜱᴛꜱ !')
 
         files = files_[0]
