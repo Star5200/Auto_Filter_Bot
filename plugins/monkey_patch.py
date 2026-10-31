@@ -303,6 +303,17 @@ async def custom_send_video(
             return None
 
 
+def _preview_disabled(msg) -> bool:
+    """True if the copied text message should be sent WITHOUT a link preview.
+    Works with old Pyrogram (message.web_page_preview) and new Kurigram
+    (message.link_preview_options / message.web_page) - the old attribute no longer exists."""
+    opts = getattr(msg, "link_preview_options", None)
+    if opts is not None and getattr(opts, "is_disabled", False):
+        return True
+    has_preview = getattr(msg, "web_page_preview", None) or getattr(msg, "web_page", None)
+    return not has_preview
+
+
 async def custom_copy(
     self: "types.Message",
     chat_id: Union[int, str],
@@ -343,7 +354,7 @@ async def custom_copy(
             text=self.text,
             entities=self.entities,
             parse_mode=enums.ParseMode.DISABLED,
-            disable_web_page_preview=not self.web_page_preview,
+            disable_web_page_preview=_preview_disabled(self),
             disable_notification=disable_notification,
             message_thread_id=message_thread_id,
             reply_to_message_id=reply_to_message_id,
@@ -465,7 +476,7 @@ async def custom_copy(
                 message_thread_id=message_thread_id,
                 allow_paid_broadcast=allow_paid_broadcast
             )
-        elif self.web_page_preview:
+        elif getattr(self, "web_page_preview", None):
             return await self._client.send_web_page(
                 chat_id,
                 url=self.web_page_preview.webpage.url,
