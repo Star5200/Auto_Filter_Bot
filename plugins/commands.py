@@ -1049,6 +1049,39 @@ async def stop_button(bot, message):
     await msg.edit("<b><i><u>ʙᴏᴛ ɪꜱ ʀᴇꜱᴛᴀʀᴛᴇᴅ</u> ✅</i></b>")
     os.execl(sys.executable, sys.executable, *sys.argv)
 
+@Client.on_message(filters.command("lockreqs") & filters.user(ADMINS))
+async def lock_requirements(bot, message):
+    """Admin only: builds a requirements.txt with the EXACT versions that are installed
+    and running right now, so Render never silently installs newer (breaking) versions."""
+    import importlib.metadata as md
+    import io
+    import re
+    try:
+        with open("requirements.txt", encoding="utf-8") as f:
+            src = f.read().splitlines()
+    except Exception as e:
+        return await message.reply(f"<b>requirements.txt padh nahi paya:</b> <code>{e}</code>", parse_mode=enums.ParseMode.HTML)
+    out = []
+    for line in src:
+        item = line.strip()
+        if not item or item.startswith("#") or item.startswith("git+") or "==" in item:
+            out.append(line)
+            continue
+        name = re.split(r"[<>=!~\[; ]", item, maxsplit=1)[0]
+        try:
+            out.append(f"{name}=={md.version(name)}")
+        except md.PackageNotFoundError:
+            out.append(line)
+    data = io.BytesIO(("\n".join(out) + "\n").encode("utf-8"))
+    data.name = "requirements.txt"
+    kuri = next((l for l in out if l.lower().startswith("kurigram")), "kurigram")
+    await message.reply_document(
+        data,
+        caption=f"<b>✅ Pinned requirements.txt ready\n\nKurigram: <code>{kuri}</code>\n\nGitHub me purani requirements.txt ki jagah ye file lagao.</b>",
+        parse_mode=enums.ParseMode.HTML
+    )
+
+
 @Client.on_message(filters.command("del_msg") & filters.user(ADMINS))
 async def del_msg(client, message):
     confirm_markup = InlineKeyboardMarkup([[
