@@ -103,6 +103,8 @@ async def is_req_subscribed(bot, user_id, rqfsub_channels):
 
     return btn
 
+_FSUB_LOCKS = {}
+
 async def is_subscribed(bot, user_id, fsub_channels):
     btn = []
     
@@ -113,7 +115,23 @@ async def is_subscribed(bot, user_id, fsub_channels):
         except UserNotParticipant:
             try:
                 chat = await bot.get_chat(int(channel_id))
-                invite_link = await bot.export_chat_invite_link(channel_id)
+                # Telegram REVOKES the old primary link whenever export_chat_invite_link
+                # is called. So we call it only ONCE per channel after every bot start
+                # (old link gets revoked, new one is made) and then reuse the same link
+                # for all users. Calling it per user killed links users had just received.
+                invite_link = temp.TEMP_INVITE_LINKS.get(channel_id)
+                if not invite_link:
+                    lock = _FSUB_LOCKS.setdefault(channel_id, asyncio.Lock())
+                    async with lock:
+                        invite_link = temp.TEMP_INVITE_LINKS.get(channel_id)
+                        if not invite_link:
+                            try:
+                                invite_link = await bot.export_chat_invite_link(channel_id)
+                            except Exception:
+                                invite_link = getattr(chat, "invite_link", None)
+                                if not invite_link:
+                                    invite_link = (await bot.create_chat_invite_link(int(channel_id))).invite_link
+                            temp.TEMP_INVITE_LINKS[channel_id] = invite_link
                 return InlineKeyboardButton(f"📢 Join {chat.title}", url=invite_link)
             except Exception as e:
                 logger.warning(f"Failed to create invite for {channel_id}: {e}")
