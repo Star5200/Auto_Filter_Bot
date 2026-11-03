@@ -603,19 +603,39 @@ def _add_lang_core(caption, *sources):
     langs = detect_langs(" ".join(str(s) for s in sources if s))
     if not langs:
         return caption
-    line = f"<blockquote>🔊 {', '.join(langs)}</blockquote>"
+    line = f"<blockquote><b>🔊 {', '.join(langs)}</b></blockquote>"
     return f"{caption}\n\n{line}" if caption.strip() else line
 
 # VLC line: har file ke caption ke end mein judegi
 VLC_LINE = '<b>⚠️ Use VLC Player to avoid sound issues &amp; switch languages</b>'
 
+def _credit_text():
+    import html as _html
+    try:
+        from info import CAPTION_CREDIT
+    except Exception:
+        return ""
+    return _html.escape((CAPTION_CREDIT or "").strip(), quote=False)
+
 def add_lang_line(caption, *sources):
-    caption = _add_lang_core(caption, *sources)
-    if "VLC Player" in caption:
-        return caption
-    if len(caption) + len(VLC_LINE) > 1000:  # Telegram caption limit 1024
-        return caption
-    return f"{caption}\n\n{VLC_LINE}" if caption.strip() else VLC_LINE
+    base = caption or ""
+    # 1) naam (credit) caption ke end mein, agar pehle se nahi hai
+    credit = _credit_text()
+    if base.strip() and credit and credit.lower() not in base.lower() and len(base) + len(credit) + 1 <= 900:
+        # agar caption file extension pe khatam hota hai (.mkv, .mp4 ...), naam extension se PEHLE judega
+        m = re.search(r"\.(mkv|mp4|avi|webm|mov|m4v|ts|flv|wmv|mpg|mpeg|3gp|zip|rar|7z|mp3|flac|srt|ass|apk)\s*$", base, re.I)
+        if m:
+            base = f"{base[:m.start()]} {credit}{base[m.start():].rstrip()}"
+        else:
+            base = f"{base} {credit}"
+    # 2) poora caption bold (agar pehle se bold/quote nahi hai)
+    if base.strip() and not base.lstrip().startswith("<b>") and "<blockquote" not in base:
+        base = f"<b>{base}</b>"
+    # 3) audio line (quote + bold) aur VLC line (bold)
+    caption = _add_lang_core(base, *sources)
+    if "VLC Player" not in caption and len(caption) + len(VLC_LINE) <= 1000:  # Telegram caption limit 1024
+        caption = f"{caption}\n\n{VLC_LINE}" if caption.strip() else VLC_LINE
+    return caption
 # ---------- end ----------
 
 EPISODE_RANGE_RE = re.compile(r'\b([Ee])(\d{1,4})\s+[Ee]?(\d{1,4})\b')
