@@ -609,6 +609,15 @@ def _add_lang_core(caption, *sources):
 # VLC line: har file ke caption ke end mein judegi
 VLC_LINE = '<b>⚠️ Use VLC Player to avoid sound issues &amp; switch languages</b>'
 
+# ---- file extensions (caption mein naam extension se pehle judta hai) ----
+_EXT_SAFE = "|".join([
+    "mkv", "mp4", "avi", "webm", "mov", "m4v", "flv", "wmv", "mpg", "mpeg", "3gp", "3g2", "m2ts", "mts",
+    "divx", "rmvb", "ogv", "vob", "f4v", "asf",
+    "mp3", "flac", "m4a", "aac", "wav", "wma", "opus", "mka", "aiff",
+    "srt", "vtt", "zip", "rar", "7z", "tar", "gz", "apk", "pdf", "epub", "exe",
+])
+_EXT_ALL = _EXT_SAFE + "|" + "|".join(["ts", "rm", "ogg", "ass", "ssa", "sub", "idx", "sup", "ac3", "eac3", "dts", "iso", "txt", "hevc"])
+
 def _credit_text():
     import html as _html
     try:
@@ -622,12 +631,18 @@ def add_lang_line(caption, *sources):
     # 1) naam (credit) caption ke end mein, agar pehle se nahi hai
     credit = _credit_text()
     if base.strip() and credit and credit.lower() not in base.lower() and len(base) + len(credit) + 1 <= 900:
-        # agar caption file extension pe khatam hota hai (.mkv, .mp4 ...), naam extension se PEHLE judega
-        m = re.search(r"\.(mkv|mp4|avi|webm|mov|m4v|ts|flv|wmv|mpg|mpeg|3gp|zip|rar|7z|mp3|flac|srt|ass|apk)\s*$", base, re.I)
+        # Naam LINK ke ANDAR aur extension (mkv / .mkv) se PEHLE judta hai.
+        # Caption aisa hota hai: <b><a href="...">Movie 480p x264 mkv</a></b>
+        closers = r"(?:\s*</[a-zA-Z]+>)*\s*"
+        # Dot ke saath (.mkv) SAB extensions chalte hain; dot ke bina (" mkv", jab bot naam saaf kar deta hai)
+        # sirf wo extensions jo kisi aam shabd se nahi takrate (jaise "ts"/"sub" ko chhod diya).
+        m = re.search(r"(?:\.(?:" + _EXT_ALL + r")|\s(?:" + _EXT_SAFE + r"))(" + closers + r")$", base, re.I)
         if m:
-            base = f"{base[:m.start()]} {credit}{base[m.start():].rstrip()}"
+            base = f"{base[:m.start()]} {credit}{base[m.start():]}"
         else:
-            base = f"{base} {credit}"
+            m2 = re.search(r"(" + closers + r")$", base)
+            pos = m2.start() if m2 else len(base)
+            base = f"{base[:pos]} {credit}{base[pos:]}"
     # 2) poora caption bold (agar pehle se bold/quote nahi hai)
     if base.strip() and not base.lstrip().startswith("<b>") and "<blockquote" not in base:
         base = f"<b>{base}</b>"
