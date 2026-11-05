@@ -98,7 +98,7 @@ TMDB_POSTER = is_enabled(environ.get('TMDB_POSTER', "True"), True) # Shows TMDB 
 LANDSCAPE_POSTER = is_enabled(environ.get('LANDSCAPE_POSTER', "True"), True) # Shows landscape poster in notification msg
 SHOW_IMDB_POSTER = is_enabled(environ.get("SHOW_IMDB_POSTER", "False"), False)  # Search result mein IMDb poster dikhana? False = sirf text (kabhi galat poster nahi)
 POWERED_BY_NAME = environ.get("POWERED_BY_NAME", "StarCinemaFilterBot")  # Search result mein "POWERED BY" ka naam
-POWERED_BY_URL = environ.get("POWERED_BY_URL", "")  # Link chahiye to yahan daalo; khaali = bina link (abhi bina link)
+POWERED_BY_URL = environ.get("POWERED_BY_URL", "https://t.me/StarCinemaFilterBot")  # Naam pe tap karne par khulne wala link (khaali = bina link)
 POSTER_SOURCE = environ.get("POSTER_SOURCE", "file").strip().lower()  # "file" = update post mein FILE ka apna cover/thumbnail (TMDB/IMDb sirf backup); "tmdb" = purana tareeka
 
 # ============================

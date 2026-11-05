@@ -1106,13 +1106,13 @@ def build_result_header(search, total_results, remaining_seconds, mention, ultra
     import html as _html
     name = _html.escape(POWERED_BY_NAME or "", quote=False)
     powered = f"<a href='{POWERED_BY_URL}'>{name}</a>" if POWERED_BY_URL else name
-    lines = [f"🎬 ᴛɪᴛʟᴇ : <code>{_html.escape(str(search), quote=False)}</code>"]
+    lines = [f"🍿 ᴛɪᴛʟᴇ : <code>{_html.escape(str(search), quote=False)}</code>"]
     if not ultra:
-        lines.append(f"📂 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>")
+        lines.append(f"🗃 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>")
     lines.append(f"⚡ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>")
     return (
         "<b>" + "\n".join(lines)
-        + f"\n\n👤 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {mention}\n🚀 ᴘᴏᴡᴇʀᴇᴅ ʙʏ : {powered}"
+        + f"\n\n🙋 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {mention}\n💎 ᴘᴏᴡᴇʀᴇᴅ ʙʏ : {powered}"
         + "\n\n📥 <u>Your Requested Files Are Here</u> 👇</b>\n"
     )
 
