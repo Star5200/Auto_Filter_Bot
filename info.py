@@ -96,6 +96,10 @@ ABOVE_PREVIEW = is_enabled(environ.get('ABOVE_PREVIEW', "True"), True) # Shows l
 TMDB_API_KEY = environ.get('TMDB_API_KEY', '') # preffer to use your own tmdb API Key get it from https://www.themoviedb.org/settings/api
 TMDB_POSTER = is_enabled(environ.get('TMDB_POSTER', "True"), True) # Shows TMDB poster in notification msg
 LANDSCAPE_POSTER = is_enabled(environ.get('LANDSCAPE_POSTER', "True"), True) # Shows landscape poster in notification msg
+SHOW_IMDB_POSTER = is_enabled(environ.get("SHOW_IMDB_POSTER", "False"), False)  # Search result mein IMDb poster dikhana? False = sirf text (kabhi galat poster nahi)
+POWERED_BY_NAME = environ.get("POWERED_BY_NAME", "StarCinemaFilterBot")  # Search result mein "POWERED BY" ka naam
+POWERED_BY_URL = environ.get("POWERED_BY_URL", "")  # Link chahiye to yahan daalo; khaali = bina link (abhi bina link)
+POSTER_SOURCE = environ.get("POSTER_SOURCE", "file").strip().lower()  # "file" = update post mein FILE ka apna cover/thumbnail (TMDB/IMDb sirf backup); "tmdb" = purana tareeka
 
 # ============================
 # Verification Settings

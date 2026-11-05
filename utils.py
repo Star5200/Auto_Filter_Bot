@@ -3,7 +3,7 @@ import re
 import os
 import random
 import string
-from info import ULTRA_FAST_MODE, MAX_LIST_ELM, BAD_WORDS, LONG_IMDB_DESCRIPTION, IS_VERIFY, MAX_B_TN, TUTORIAL, TUTORIAL_2, TUTORIAL_3, LOG_CHANNEL, TMDB_ON_SEARCH
+from info import SHOW_IMDB_POSTER, POWERED_BY_NAME, POWERED_BY_URL, ULTRA_FAST_MODE, MAX_LIST_ELM, BAD_WORDS, LONG_IMDB_DESCRIPTION, IS_VERIFY, MAX_B_TN, TUTORIAL, TUTORIAL_2, TUTORIAL_3, LOG_CHANNEL, TMDB_ON_SEARCH
 from imdbkit import IMDBKit # pyrefly: ignore 
 import asyncio
 from pyrogram.types import Message, InlineKeyboardButton
@@ -1101,9 +1101,25 @@ def clean_search_text(search_raw: str) -> str:
     else:
         return ""
 
+def build_result_header(search, total_results, remaining_seconds, mention, ultra=False):
+    """Search result ka upar wala hissa (text-only format). Bold + saaf emojis."""
+    import html as _html
+    name = _html.escape(POWERED_BY_NAME or "", quote=False)
+    powered = f"<a href='{POWERED_BY_URL}'>{name}</a>" if POWERED_BY_URL else name
+    lines = [f"🎬 ᴛɪᴛʟᴇ : <code>{_html.escape(str(search), quote=False)}</code>"]
+    if not ultra:
+        lines.append(f"📂 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>")
+    lines.append(f"⚡ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>")
+    return (
+        "<b>" + "\n".join(lines)
+        + f"\n\n👤 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {mention}\n🚀 ᴘᴏᴡᴇʀᴇᴅ ʙʏ : {powered}"
+        + "\n\n📥 <u>Your Requested Files Are Here</u> 👇</b>\n"
+    )
+
+
 async def get_cap(settings, remaining_seconds, files, query, total_results, search, offset=0):
     try:
-        if settings["imdb"]:
+        if settings["imdb"] and SHOW_IMDB_POSTER:
             IMDB_CAP = temp.IMDB_CAP.get(query.from_user.id)
             if IMDB_CAP:
                 cap = IMDB_CAP
@@ -1166,22 +1182,7 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                             f"</a></b>"
                         )
                 else:
-                    if ULTRA_FAST_MODE:
-                        cap = (
-                            f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                            f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                            f"📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {query.from_user.mention}\n"
-                            
-                        )
-                    else:
-                        cap = (
-                            f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                            f"🧱 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>\n"
-                            f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                            f"📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {query.from_user.mention}\n"
-                            
-                        )
-                    cap += "\n\n<u>Your Requested Files Are Here</u> \n\n</b>"
+                    cap = build_result_header(search, total_results, remaining_seconds, query.from_user.mention, ULTRA_FAST_MODE) + "\n"
                     for idx, file in enumerate(files, start=offset + 1):
                         cap += (
                             f"<b>{idx}. "
@@ -1193,22 +1194,7 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
                         )
 
         else:
-            if ULTRA_FAST_MODE:
-                cap = (
-                    f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                    f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                    
-                )
-            else:
-                cap = (
-                    f"<b>🏷 ᴛɪᴛʟᴇ : <code>{search}</code>\n"
-                    f"🧱 ᴛᴏᴛᴀʟ ꜰɪʟᴇꜱ : <code>{total_results}</code>\n"
-                    f"⏰ ʀᴇsᴜʟᴛ ɪɴ : <code>{remaining_seconds} Sᴇᴄᴏɴᴅs</code>\n\n"
-                    f"📝 ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ : {query.from_user.mention}\n"
-                    
-                )
-
-            cap += "\n\n<u>Your Requested Files Are Here</u>\n\n</b>"
+            cap = build_result_header(search, total_results, remaining_seconds, query.from_user.mention, ULTRA_FAST_MODE) + "\n"
             for idx, file in enumerate(files, start=offset + 1):
                         cap += (
                             f"<b>{idx}. "
