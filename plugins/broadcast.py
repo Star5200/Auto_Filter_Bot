@@ -24,27 +24,65 @@ async def broadcast_cancel(bot, query):
         temp.B_GROUPS_CANCEL = True
         await query.message.edit("🛑 ᴛʀʏɪɴɢ ᴛᴏ ᴄᴀɴᴄᴇʟ ɢʀᴏᴜᴘꜱ ʙʀᴏᴀᴅᴄᴀꜱᴛɪɴɢ...")
 
+PENDING_BC = {}  # (chat_id, ask_message_id) -> {kind, message, b_msg, ts}
+
+
+async def _ask_pin(message, kind):
+    """Pin ka sawaal INLINE buttons se poochta hai (typing/listen pe depend nahi karta)."""
+    label = "users" if kind == "users" else "groups"
+    ask = await message.reply(
+        f"<b>Do you want to pin this message in {label}?</b>",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📌 Yes", callback_data=f"bcpin#{kind}#yes"),
+                InlineKeyboardButton("No", callback_data=f"bcpin#{kind}#no"),
+            ],
+            [InlineKeyboardButton("❌ Cancel", callback_data=f"bcpin#{kind}#cancel")],
+        ]),
+        parse_mode=enums.ParseMode.HTML
+    )
+    PENDING_BC[(ask.chat.id, ask.id)] = {
+        "kind": kind,
+        "message": message,
+        "b_msg": message.reply_to_message,
+        "ts": time.time(),
+    }
+
+
+@Client.on_callback_query(filters.regex(r"^bcpin#(users|groups)#(yes|no|cancel)$"))
+async def bc_pin_answer(bot, query):
+    if query.from_user.id not in ADMINS:
+        return await query.answer("Ye sirf admin ke liye hai.", show_alert=True)
+    _, kind, ans = query.data.split("#")
+    chat_id = query.message.chat.id
+    data = PENDING_BC.pop((chat_id, query.message.id), None)
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    if not data or time.time() - data["ts"] > 600:
+        return await bot.send_message(chat_id, "❌ Ye request purani ho gayi. /broadcast dobara chalao.")
+    if ans == "cancel":
+        return await bot.send_message(chat_id, "❌ Broadcast cancelled.")
+    if lock.locked():
+        return await bot.send_message(chat_id, "⚠️ Another broadcast is in progress. Please wait...")
+    is_pin = ans == "yes"
+    if kind == "users":
+        await run_users_broadcast(bot, data["message"], data["b_msg"], is_pin)
+    else:
+        await run_groups_broadcast(bot, data["message"], data["b_msg"], is_pin)
+
+
 @Client.on_message(filters.command("broadcast") & filters.user(ADMINS) & filters.private)
 async def broadcast_users(bot, message):
     if not message.reply_to_message:
         return await message.reply("<b>Reply to a message to broadcast.</b>",parse_mode=enums.ParseMode.HTML)
     if lock.locked():
         return await message.reply("⚠️ Another broadcast is in progress. Please wait...")
-    ask = await message.reply(
-        "<b>Do you want to pin this message in users?</b>",
-        reply_markup=ReplyKeyboardMarkup([["Yes", "No"]], one_time_keyboard=True, resize_keyboard=True)
-    )
-    try:
-        dreamxbotz_user_response = await bot.listen(chat_id=message.chat.id, user_id=message.from_user.id, timeout=60)
-    except asyncio.TimeoutError:
-        await ask.delete()
-        return await message.reply("❌ Timed out. Broadcast cancelled.")
-    await ask.delete()
-    if dreamxbotz_user_response.text not in ("Yes", "No"):
-        return await message.reply("❌ Invalid input. Broadcast cancelled.")
+    await _ask_pin(message, "users")
 
-    is_pin = dreamxbotz_user_response.text == "Yes"
-    b_msg = message.reply_to_message
+
+async def run_users_broadcast(bot, message, b_msg, is_pin):
     users = [user async for user in await db.get_all_users()]
     total_users = len(users)
     dreamxbotz_status_msg = await message.reply_text("📤 <b>Broadcasting your message...</b>")
@@ -129,20 +167,10 @@ async def broadcast_users(bot, message):
 async def broadcast_group(bot, message):
     if not message.reply_to_message:
         return await message.reply("<b>Reply to a message to group broadcast.</b>", parse_mode=enums.ParseMode.HTML)
-    ask = await message.reply(
-        "<b>Do you want to pin this message in groups?</b>",
-        reply_markup=ReplyKeyboardMarkup([["Yes", "No"]], one_time_keyboard=True, resize_keyboard=True)
-    )
-    try:
-        dreamxbotz_user_response = await bot.listen(chat_id=message.chat.id, user_id=message.from_user.id, timeout=60)
-    except asyncio.TimeoutError:
-        await ask.delete()
-        return await message.reply("❌ Timed out. Broadcast cancelled.")
-    await ask.delete()
-    if dreamxbotz_user_response.text not in ("Yes", "No"):
-        return await message.reply("❌ Invalid input. Broadcast cancelled.")
-    is_pin = dreamxbotz_user_response.text == "Yes"
-    b_msg = message.reply_to_message
+    await _ask_pin(message, "groups")
+
+
+async def run_groups_broadcast(bot, message, b_msg, is_pin):
     chats = await db.get_all_chats()
     total_chats = await db.total_chat_count()
     dreamxbotz_status_msg = await message.reply_text("📤 <b>Broadcasting your message to groups...</b>")
