@@ -3,7 +3,7 @@ import re
 import os
 import random
 import string
-from info import SHOW_IMDB_POSTER, POWERED_BY_NAME, POWERED_BY_URL, ULTRA_FAST_MODE, MAX_LIST_ELM, BAD_WORDS, LONG_IMDB_DESCRIPTION, IS_VERIFY, MAX_B_TN, TUTORIAL, TUTORIAL_2, TUTORIAL_3, LOG_CHANNEL, TMDB_ON_SEARCH
+from info import OWNER_UPI_ID, SHOW_IMDB_POSTER, POWERED_BY_NAME, POWERED_BY_URL, ULTRA_FAST_MODE, MAX_LIST_ELM, BAD_WORDS, LONG_IMDB_DESCRIPTION, IS_VERIFY, MAX_B_TN, TUTORIAL, TUTORIAL_2, TUTORIAL_3, LOG_CHANNEL, TMDB_ON_SEARCH
 from imdbkit import IMDBKit # pyrefly: ignore 
 import asyncio
 from pyrogram.types import Message, InlineKeyboardButton
@@ -1100,6 +1100,11 @@ def clean_search_text(search_raw: str) -> str:
         return unique_phrases[0].title()
     else:
         return ""
+
+def upi_copy_button():
+    """Premium wali har screen par dikhne wala 'UPI ID copy' button (tap = UPI ID clipboard mein copy)."""
+    return InlineKeyboardButton("📋 ᴜᴘɪ ɪᴅ ᴄᴏᴘʏ ᴋᴀʀᴇɪɴ", copy_text=OWNER_UPI_ID, style=enums.ButtonStyle.PRIMARY)
+
 
 def build_result_header(search, total_results, remaining_seconds, mention, ultra=False):
     """Search result ka upar wala hissa (text-only format). Bold + saaf emojis."""
