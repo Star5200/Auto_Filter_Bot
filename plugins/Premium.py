@@ -5,7 +5,7 @@ import pytz
 import datetime
 from Script import script 
 from info import ADMINS, PREMIUM_LOGS, STAR_PREMIUM_PLANS, SUBSCRIPTION
-from utils import get_seconds, temp
+from utils import get_seconds, temp, upi_copy_button
 from database.users_chats_db import db 
 import asyncio
 from pyrogram import Client, filters 
@@ -197,6 +197,8 @@ async def plan(client, message):
         f"- ɪᴅ - `{user_id}`\n- ɴᴀᴍᴇ - {users}</b>")
     btn = [[
             InlineKeyboardButton('• ʙᴜʏ ᴘʀᴇᴍɪᴜᴍ •', callback_data='buy_info'),
+        ],[
+            upi_copy_button()
         ],[
             InlineKeyboardButton('• ʀᴇꜰᴇʀ ꜰʀɪᴇɴᴅꜱ', callback_data='reffff'),
             InlineKeyboardButton('ꜰʀᴇᴇ ᴛʀɪᴀʟ •', callback_data='free')
