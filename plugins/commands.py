@@ -280,12 +280,22 @@ async def start(client, message):
                         InlineKeyboardButton('❌ ᴄʟᴏꜱᴇ ❌', callback_data='close_data', style=enums.ButtonStyle.DANGER)
                       ]]
             reply_markup = InlineKeyboardMarkup(buttons)
-            await message.reply_photo(
-                photo=(SUBSCRIPTION),
-                caption=script.PREPLANS_TXT.format(message.from_user.mention, OWNER_UPI_ID, QR_CODE),
-                reply_markup=reply_markup,
-                parse_mode=enums.ParseMode.HTML
-            )
+            plans_caption = script.PREPLANS_TXT.format(message.from_user.mention, OWNER_UPI_ID, QR_CODE)
+            try:
+                await message.reply_photo(
+                    photo=(SUBSCRIPTION),
+                    caption=plans_caption,
+                    reply_markup=reply_markup,
+                    parse_mode=enums.ParseMode.HTML
+                )
+            except Exception as e:
+                # Photo (SUBSCRIPTION link) na chale ya buttons mein dikkat ho, tab bhi plans + UPI hamesha dikhen.
+                logger.exception(f"Premium plans photo failed, sending text instead: {e}")
+                try:
+                    await message.reply_text(plans_caption, reply_markup=reply_markup, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
+                except Exception as e2:
+                    logger.exception(f"Premium plans text with buttons failed, sending without buttons: {e2}")
+                    await message.reply_text(plans_caption, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML)
             return  
 
         if len(message.command) == 2 and message.command[1].startswith('getfile'):
