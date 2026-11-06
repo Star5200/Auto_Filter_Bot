@@ -1102,8 +1102,18 @@ def clean_search_text(search_raw: str) -> str:
         return ""
 
 def upi_copy_button():
-    """Premium wali har screen par dikhne wala 'UPI ID copy' button (tap = UPI ID clipboard mein copy)."""
-    return InlineKeyboardButton("📋 ᴜᴘɪ ɪᴅ ᴄᴏᴘʏ ᴋᴀʀᴇɪɴ", copy_text=OWNER_UPI_ID, style=enums.ButtonStyle.PRIMARY)
+    """Premium wali har screen par dikhne wala 'UPI ID copy' button (tap = UPI ID clipboard mein copy).
+    Naye Kurigram mein copy_text ko plain string nahi, CopyTextButton object chahiye - isliye wahi use hota hai.
+    Agar library ye support na kare, to callback button banta hai jo UPI ID popup mein dikhata hai (screen kabhi nahi tootti)."""
+    label = "📋 ᴜᴘɪ ɪᴅ ᴄᴏᴘʏ ᴋᴀʀᴇɪɴ"
+    try:
+        import inspect
+        from pyrogram.types import CopyTextButton
+        if "copy_text" in inspect.signature(InlineKeyboardButton.__init__).parameters:
+            return InlineKeyboardButton(label, copy_text=CopyTextButton(text=OWNER_UPI_ID), style=enums.ButtonStyle.PRIMARY)
+    except Exception as e:
+        logger.warning(f"copy_text button not supported, using popup button: {e}")
+    return InlineKeyboardButton(label, callback_data="copy_upi", style=enums.ButtonStyle.PRIMARY)
 
 
 def build_result_header(search, total_results, remaining_seconds, mention, ultra=False):
