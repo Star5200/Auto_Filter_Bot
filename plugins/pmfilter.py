@@ -1371,6 +1371,9 @@ async def cb_handler(client: Client, query: CallbackQuery):
                 parse_mode=enums.ParseMode.HTML
             )
 
+    elif query.data == "copy_upi":
+        await query.answer(f"UPI ID:\n{OWNER_UPI_ID}\n\n(ID pe tap karke hold karein aur copy karein)", show_alert=True)
+
     elif query.data == "premium_info":
         try:
             btn = [[
