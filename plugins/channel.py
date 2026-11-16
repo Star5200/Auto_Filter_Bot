@@ -4,26 +4,11 @@ import asyncio
 from datetime import datetime
 from collections import defaultdict
 from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
-try:
-    from plugins.Dreamxfutures.Imdbposter import _title_similarity
-except ImportError:
-    # Purani Imdbposter.py mein ye function nahi hota - isliye apna chhota version (deploy kabhi nahi tootega)
-    from difflib import SequenceMatcher as _SM
-
-    def _title_similarity(a, b) -> float:
-        a = re.sub(r"[^a-z0-9 ]", "", (a or "").lower()).strip()
-        b = re.sub(r"[^a-z0-9 ]", "", (b or "").lower()).strip()
-        if not a or not b:
-            return 0.0
-        return _SM(None, a, b).ratio()
+from difflib import SequenceMatcher as _SM
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
 from io import BytesIO
 from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, ADMINS
-try:
-    from info import POSTER_SOURCE
-except ImportError:
-    POSTER_SOURCE = "file"
 from Script import script
 from database.ia_filterdb import save_file, get_bad_files
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
@@ -36,10 +21,16 @@ from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
-# Precomputed sets for faster lookups
-# NOTE: genre aur aam shabd (war, history, music, apple, prime, ben ...) yahan se hata diye hain,
-# kyunki ye asli movie ke naam ka hissa ho sakte hain ("A History of Violence", "War Machine",
-# "Ben 10", "The Apple") aur hatane se title bigad jata tha -> galat poster.
+# Hamesha DB file ka hi cover/thumbnail use hoga, TMDB/IMDb poster kabhi nahi aayega
+POSTER_SOURCE = "file"
+
+def _title_similarity(a, b) -> float:
+    a = re.sub(r"[^a-z0-9 ]", "", (a or "").lower()).strip()
+    b = re.sub(r"[^a-z0-9 ]", "", (b or "").lower()).strip()
+    if not a or not b:
+        return 0.0
+    return _SM(None, a, b).ratio()
+
 IGNORE_WORDS = {
     "rarbg", "dub", "sub", "sample", "mkv", "aac", "combined",
     "hdcam", "hdtc", "camrip", "ts", "tc",
@@ -51,10 +42,9 @@ IGNORE_WORDS = {
     "mar", "marathi", "guj", "gujarati", "urd", "urdu", "kor", "korean", "jpn",
     "japanese", "nf", "netflix", "sonyliv", "sliv", "amzn",
     "primevideo", "hotstar", "zee5", "jio", "jhs", "hbo",
-    "hoichoi", "sunnxt"
-}|BAD_WORDS
+    "hoichoi", "sunnxt", "cinevood", "esub", "hc-esub", "x264", "x265", "10bit"
+} | BAD_WORDS
 
-# Constants
 CAPTION_LANGUAGES = {
     "hin": "Hindi", "hindi": "Hindi",
     "tam": "Tamil", "tamil": "Tamil",
@@ -87,7 +77,6 @@ STANDARD_GENRES = {
     'Musical', 'Mystery', 'Romance', 'Sci-Fi', 'Sport', 'Thriller', 'War', 'Western'
 }
 
-# Precompiled regex patterns
 CLEAN_PATTERN = re.compile(r'@[^ \n\r\t\.,:;!?()\[\]{}<>\\/"\'=_%]+|\bwww\.[^\s\]\)]+|\([\@^]+\)|\[[\@^]+\]')
 NORMALIZE_PATTERN = re.compile(r"[._]+|[()\[\]{}:;'–!,.?_]")
 QUALITY_PATTERN = re.compile(
@@ -98,11 +87,10 @@ QUALITY_PATTERN = re.compile(
 )
 YEAR_PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:19|20)\d{2}(?![A-Za-z0-9])")
 RESOLUTION_TERMS = {"360p", "480p", "720p", "1080p", "2160p", "4k", "1440p", "540p", "240p", "140p"}
-RANGE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})\s*(?:to|-)\s*(?:E(?:p(?:isode)?)?)?0*(\d{1,3})',re.IGNORECASE)
+RANGE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})\s*(?:to|-)\s*(?:E(?:p(?:isode)?)?)?0*(\d{1,3})', re.IGNORECASE)
 SINGLE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})', re.IGNORECASE)
 NAMED_REGEX = re.compile(r'Season\s*0*(\d{1,2})[\s\-,:]*Ep(?:isode)?\s*0*(\d{1,3})', re.IGNORECASE)
-EP_ONLY_RANGE = re.compile(r'\b(?:EP|Episode)0*(\d{1,3})\s*-\s*0*(\d{1,3})\b',re.IGNORECASE)
-
+EP_ONLY_RANGE = re.compile(r'\b(?:EP|Episode)0*(\d{1,3})\s*-\s*0*(\d{1,3})\b', re.IGNORECASE)
 
 MEDIA_FILTER = filters.document | filters.video | filters.audio
 locks = defaultdict(asyncio.Lock)
@@ -142,6 +130,92 @@ def extract_season_episode(filename: str) -> Tuple[Optional[int], Optional[str]]
             return season, ep
     return None, None
 
+
+async def _download_any_thumb(bot, obj) -> Optional[bytes]:
+    """Kisi bhi photo/thumb/cover object se bytes download karta hai."""
+    if not obj:
+        return None
+    try:
+        # Agar list hai (jaise thumbs ya sizes), toh sabse bada (last) size lo
+        target = obj[-1] if isinstance(obj, (list, tuple)) else obj
+        file_id = getattr(target, "file_id", None)
+        if not file_id and hasattr(target, "thumbs") and target.thumbs:
+            file_id = target.thumbs[-1].file_id
+        if not file_id:
+            return None
+        data = await bot.download_media(file_id, in_memory=True)
+        if not data:
+            return None
+        raw = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
+        return raw if raw else None
+    except Exception as e:
+        logger.warning(f"Thumb download warning: {e}")
+        return None
+
+
+async def _get_file_cover(bot, message=None, media=None) -> Optional[bytes]:
+    """
+    Database file se Cover ya Thumbnail nikalne ka 100% paka tarika:
+    1. Video Cover (Telegram ke naye video covers: message.video_cover / media.video_cover / media.cover)
+    2. Media Thumbs (message.video.thumbs / message.document.thumbs / media.thumbs)
+    3. Message Photo / Thumbs
+    4. Agar message fresh fetch karna pade toh bot.get_messages se laakar check karega.
+    """
+    try:
+        # Step 1: Check message-level & media-level video_cover / cover (New Telegram Video Cover feature)
+        for container in (message, media):
+            if not container:
+                continue
+            for attr in ("video_cover", "cover", "photo"):
+                cov = getattr(container, attr, None)
+                if cov:
+                    raw = await _download_any_thumb(bot, cov)
+                    if raw:
+                        return raw
+
+        # Step 2: Check standard thumbs on media (video.thumbs / document.thumbs / audio.thumbs)
+        for container in (media, getattr(message, "video", None), getattr(message, "document", None), getattr(message, "audio", None)):
+            if not container:
+                continue
+            thumbs = getattr(container, "thumbs", None)
+            if thumbs:
+                raw = await _download_any_thumb(bot, thumbs)
+                if raw:
+                    return raw
+            thumb = getattr(container, "thumb", None)
+            if thumb:
+                raw = await _download_any_thumb(bot, thumb)
+                if raw:
+                    return raw
+
+        # Step 3: Agar message hai par Pyrogram ne cache ki wajah se cover nahi diya, re-fetch message
+        if message and getattr(message, "chat", None) and getattr(message, "id", None):
+            try:
+                fresh_msg = await bot.get_messages(message.chat.id, message.id)
+                if fresh_msg:
+                    for attr in ("video_cover", "cover", "photo"):
+                        cov = getattr(fresh_msg, attr, None)
+                        if cov:
+                            raw = await _download_any_thumb(bot, cov)
+                            if raw:
+                                return raw
+                    for ft in ("video", "document", "audio"):
+                        m_obj = getattr(fresh_msg, ft, None)
+                        if m_obj:
+                            for sub_attr in ("video_cover", "cover", "thumbs", "thumb"):
+                                sub_val = getattr(m_obj, sub_attr, None)
+                                if sub_val:
+                                    raw = await _download_any_thumb(bot, sub_val)
+                                    if raw:
+                                        return raw
+            except Exception as e:
+                logger.warning(f"Fresh message fetch for cover failed: {e}")
+
+    except Exception as e:
+        logger.warning(f"File cover extraction failed: {e}")
+    return None
+
+
 @Client.on_message(filters.command("announce") & filters.user(ADMINS))
 async def announce_movie_update(bot, message):
     try:
@@ -170,11 +244,6 @@ async def announce_movie_update(bot, message):
             base_name = media_info["base_name"]
             existing = await db.movie_updates.find_one({"_id": base_name})
             if existing:
-                # Already tracked in DB (e.g. its old channel post was deleted
-                # manually, or it was indexed with an older/buggy version of
-                # the parsing logic) — re-derive every file's quality/episode
-                # info fresh from its stored filename before re-posting, so
-                # old bad data gets corrected too, not just re-displayed.
                 refreshed_files = []
                 for old_file in existing.get("files", []):
                     fn = old_file.get("filename", "")
@@ -213,8 +282,6 @@ async def announce_movie_update(bot, message):
 
 
 async def notify_pending_requesters(bot, file_name):
-    """"Notify me when added" feature: checks the newly saved file's name against
-    everyone's pending not-found requests, and PMs anyone whose request now matches."""
     pending = await db.get_all_movie_requests()
     if not pending:
         return
@@ -226,11 +293,6 @@ async def notify_pending_requesters(bot, file_name):
         score = fuzz.partial_ratio(query_text, clean_name)
         if score < 75:
             continue
-        # Claim this request FIRST (atomic delete). If another concurrent upload
-        # (e.g. a second quality/print of the same movie arriving at nearly the
-        # same time) already claimed it, deleted_count will be 0 here and we
-        # skip sending — this is what prevents the same user getting notified
-        # multiple times for one request.
         try:
             claimed = await db.delete_movie_request(req['_id'])
         except Exception:
@@ -255,6 +317,7 @@ async def notify_pending_requesters(bot, file_name):
         except Exception:
             logger.exception("Could not notify user %s for movie request", req.get('user_id'))
 
+
 def schedule_update(bot, base_name, delay=5):
     if handle := pending_updates.get(base_name):
         if not handle.cancelled():
@@ -265,10 +328,9 @@ def schedule_update(bot, base_name, delay=5):
         delay,
         lambda: asyncio.create_task(update_movie_message(bot, base_name))
     )
+
+
 def _pick_year(filename: str, unified: str):
-    """Release year chuno. Pehle FILE NAME se (caption mein kuch bhi likha ho sakta hai).
-    Agar naam mein kai years hon ("Blade Runner 2049 2017 1080p") to quality se pehle wala
-    AAKHRI year lo, taaki title ka hissa (2049, 2012, 1917) year na ban jaye."""
     low = filename.lower()
     matches = list(YEAR_PATTERN.finditer(low))
     if matches:
@@ -291,10 +353,6 @@ _TECH_START_RE = re.compile(YEAR_PATTERN.pattern + "|" + QUALITY_PATTERN.pattern
 
 
 def _find_languages(caption_text: str, filename_text: str) -> str:
-    """Audio language sirf file ke naam/caption se, poore shabd (word) match karke.
-    Pehle 'hin' jaisa chhota code kisi bhi shabd ke andar mil jata tha (jaise 'machine', 'animal') -> galat language.
-    Ab: poora naam (Hindi, Tamil...) kahin bhi; 3-akshar code (hin, tam, eng...) sirf naam ke technical hisse mein
-    (year/quality ke baad). Subtitle wale (English Subs) audio nahi gine jaate."""
     found = set()
     for text in (caption_text or "", filename_text or ""):
         t = _LANG_SUBTITLE_RE.sub(" ", text.lower())
@@ -316,22 +374,50 @@ def _list_items(value):
     return [i for i in items if i and i.upper() != "N/A"]
 
 
-def _details_ok(details, base_name, media_year) -> bool:
-    """TMDB/IMDb ka result tabhi maano jab naam aur saal file se milte hon. Warna galat movie ki details/poster aa jate hain."""
+def _details_ok(details, base_name, media_year, media_lang=None) -> bool:
+    """
+    Strict Verification:
+    1. Title कम से कम 88% match hona chahiye.
+    2. Agar file mein Year (jaise 2026) hai, toh TMDB/IMDb result mein bhi Year hona zaroori hai aur exact match (max 1 year diff) hona chahiye.
+    3. Agar file mein regional Indian language (Marathi, Punjabi, Bengali, Gujarati, Kannada, Malayalam, Tamil, Telugu) hai
+       aur TMDB/IMDb result Japanese/Korean/Chinese/Animation hai, toh turant reject kar dega.
+    """
     if not details or details.get("error"):
         return False
+
     title = details.get("title") or details.get("localized_title")
     if not title:
         return False
+
     wanted = re.sub(r"\s*\(?\b(?:19|20)\d{2}\b\)?\s*$", "", base_name or "").strip()
-    if _title_similarity(wanted, title) < 0.75:
+    sim_title = _title_similarity(wanted, title)
+    sim_local = _title_similarity(wanted, details.get("localized_title") or "")
+    if max(sim_title, sim_local) < 0.88:
         return False
-    try:
-        dy, fy = int(details.get("year") or 0), int(media_year or 0)
-        if dy and fy and abs(dy - fy) > 1:
+
+    # Strict Year Check
+    if media_year:
+        try:
+            fy = int(media_year)
+            dy = int(details.get("year") or 0)
+            if not dy or abs(dy - fy) > 1:
+                return False
+        except (TypeError, ValueError):
             return False
-    except (TypeError, ValueError):
-        pass
+
+    # Language & Country sanity check (prevent random Japanese Anime matching Indian movies)
+    if media_lang and media_lang != "N/A":
+        file_langs = {l.strip().lower() for l in media_lang.split(",") if l.strip()}
+        indian_langs = {"hindi", "marathi", "tamil", "telugu", "kannada", "malayalam", "punjabi", "bengali", "gujarati", "urdu"}
+        if file_langs & indian_langs:
+            db_langs = {l.strip().lower() for l in _list_items(details.get("languages"))}
+            db_countries = {c.strip().lower() for c in _list_items(details.get("countries"))}
+            db_genres = {g.strip().lower() for g in _list_items(details.get("genres"))}
+            if ("japan" in db_countries or "japanese" in db_langs or "animation" in db_genres) and "india" not in db_countries:
+                return False
+            if db_langs and not (file_langs & db_langs) and "india" not in db_countries:
+                return False
+
     return True
 
 
@@ -388,53 +474,38 @@ def extract_media_info(filename: str, caption: str):
         if year:
             base_name += f" {year}"
 
-    # -------------------------
-    # NEW: strip season/episode tokens from final base_name
-    # -------------------------
     def _strip_season_episode_tokens(name: str) -> str:
-        """
-        Remove common season/episode markers from a title while preserving a trailing year.
-        Examples removed: S01, s01e02, 1x02, season 1, ep 02, episode 2, part 1
-        """
         if not name:
             return name
-
-        # Preserve trailing year (e.g. "Title (2020)" or "Title 2020")
         year_match = re.search(r'\(?\b(19|20)\d{2}\b\)?\s*$', name)
         year_part = ""
         if year_match:
             year_part = year_match.group(0)
             name = name[:year_match.start()].strip()
 
-        # Common patterns to remove
         patterns = [
-            r'\bS\d{1,2}E\d{1,2}\b',     # S01E02
-            r'\bS\d{1,2}\b',             # S01
-            r'\bE\d{1,2}\b',             # E02
-            r'\b\d{1,2}x\d{1,2}\b',      # 1x02
-            r'\bSeason\s*\d{1,2}\b',     # Season 1
-            r'\bEp(?:isode)?\.?\s*\d{1,3}\b',  # Ep02, Episode 2
+            r'\bS\d{1,2}E\d{1,2}\b',
+            r'\bS\d{1,2}\b',
+            r'\bE\d{1,2}\b',
+            r'\b\d{1,2}x\d{1,2}\b',
+            r'\bSeason\s*\d{1,2}\b',
+            r'\bEp(?:isode)?\.?\s*\d{1,3}\b',
             r'\bEpisode\s*\d{1,3}\b',
             r'\bPart\s*\d{1,2}\b'
         ]
-
         for p in patterns:
             name = re.sub(p, ' ', name, flags=re.IGNORECASE)
 
-        # Remove leftover separators and extra whitespace
-        name = re.sub(r'[_\.\-]+', ' ', name)     # underscores/dots/hyphens
+        name = re.sub(r'[_\.\-]+', ' ', name)
         name = re.sub(r'\s+', ' ', name).strip()
 
-        # Reattach year in canonical form if we removed it earlier
         if year_part:
             y = re.search(r'(19|20)\d{2}', year_part)
             if y:
                 name = f"{name} {y.group(0)}"
-
         return name.strip()
 
     base_name = _strip_season_episode_tokens(base_name)
-    # If stripping accidentally removed everything, fall back to a safer value
     if not base_name:
         base_name = normalize(remove_ignored_words(normalize(processed_raw))) or filename
 
@@ -474,31 +545,20 @@ async def media_handler(bot, message):
 
     try:
         if await db.movie_update_status(bot.me.id):
-            cover = await _get_file_cover(bot, media) if POSTER_SOURCE == "file" else None
+            # Hamesha message aur media dono check karke cover/thumbnail nikalein
+            cover = await _get_file_cover(bot, message, media)
             await process_and_send_update(bot, media.file_name, media.caption, cover)
     except Exception:
         logger.exception("Error processing media")
 
-async def _get_file_cover(bot, media):
-    """File ka apna cover (thumbnail) download karke bytes deta hai; nahi ho to None."""
-    try:
-        thumbs = getattr(media, "thumbs", None)
-        if not thumbs:
-            return None
-        data = await bot.download_media(thumbs[-1].file_id, in_memory=True)
-        if not data:
-            return None
-        raw = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
-        return raw or None
-    except Exception as e:
-        logger.warning(f"File cover download failed: {e}")
-        return None
-
 
 async def _send_cover(bot, movie_doc, text, buttons):
-    """Update channel mein file ke cover ke saath post bhejta hai. Fail ho to None (TMDB poster wala raasta chalega)."""
+    """
+    Update channel mein DB file ke cover/thumbnail ke saath post bhejta hai.
+    LINK_PREVIEW kuch bhi ho, agar file mein cover/thumbnail hai toh photo post hi jayega!
+    """
     cover = movie_doc.get("poster_bytes")
-    if not cover or LINK_PREVIEW:
+    if not cover:
         return None
     try:
         bio = BytesIO(bytes(cover))
@@ -513,7 +573,7 @@ async def _send_cover(bot, movie_doc, text, buttons):
     except FloodWait:
         raise
     except Exception as e:
-        logger.warning(f"Cover post failed, using TMDB poster instead: {e}")
+        logger.warning(f"Cover post failed: {e}")
         return None
 
 
@@ -533,12 +593,13 @@ async def process_and_send_update(bot, filename, caption, cover=None):
         logger.exception(f"Processing failed in process_and_send_update: {e}")
         raise
 
+
 async def _process_with_lock(bot, filename, caption, media_info, base_name, processed, cover=None):
     if not hasattr(db, 'movie_updates'):
         db.movie_updates = db.db.movie_updates
 
     movie_doc = await db.movie_updates.find_one({"_id": base_name})
-    error_tmdb=False
+    error_tmdb = False
     file_data = {
         "filename": filename,
         "processed": processed,
@@ -555,18 +616,17 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
         details = {}
         if TMDB_POSTER:
             d = await get_movie_detailsx(base_name)
-            has_img = bool(d and (d.get("poster_url") or d.get("backdrop_url")))
-            if _details_ok(d, base_name, media_info["year"]) and (has_img or POSTER_SOURCE == "file"):
+            if _details_ok(d, base_name, media_info["year"], media_info["language"]):
                 details = d
             else:
                 error_tmdb = True
-                logger.info("TMDB match not good, trying IMDB")
+                logger.info(f"TMDB match rejected for '{base_name}', trying IMDb")
         if not details:
             d = await get_movie_details(base_name) or {}
-            if _details_ok(d, base_name, media_info["year"]):
+            if _details_ok(d, base_name, media_info["year"], media_info["language"]):
                 details = d
             else:
-                logger.info(f"No reliable movie details for '{base_name}' - post will show only file info")
+                logger.info(f"No accurate movie details for '{base_name}' - hiding wrong genre/cast")
 
         raw_genres = details.get("genres", "N/A")
         if isinstance(raw_genres, str):
@@ -574,23 +634,24 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             genres = ", ".join(g for g in genre_list if g in STANDARD_GENRES) or "N/A"
         else:
             genres = ", ".join(g for g in raw_genres if g in STANDARD_GENRES) or "N/A"
+
         movie_doc = {
             "_id": base_name,
             "files": [file_data],
-            "poster_url": details.get("backdrop_url") if LANDSCAPE_POSTER and TMDB_POSTER and details.get("backdrop_url") and not error_tmdb else details.get("poster_url"),
+            "poster_url": None,  # TMDB/IMDb poster disabled so wrong poster never shows
             "genres": genres,
             "cast": ", ".join(_list_items(details.get("cast"))[:5]) or "N/A",
             "story": details.get("plot") or "N/A",
             "rating": details.get("rating", "N/A"),
-            "imdb_url": details.get("url", "")if not TMDB_POSTER or error_tmdb else details.get("tmdb_url"),
+            "imdb_url": "",
             "year": details.get("year") or media_info["year"],
             "tag": media_info["tag"],
             "ott_platform": media_info["ott_platform"],
             "message_id": None,
             "is_photo": False,
             "error_tmdb": error_tmdb,
-            "is_backdrop": details.get("backdrop_url"),
-            "poster_bytes": cover if (POSTER_SOURCE == "file" and cover) else None
+            "is_backdrop": False,
+            "poster_bytes": cover if cover else None
         }
         try:
             await db.movie_updates.insert_one(movie_doc)
@@ -601,21 +662,28 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             if movie_doc:
                 if any(f["filename"] == filename for f in movie_doc["files"]):
                     return
-                await db.movie_updates.update_one(
-                    {"_id": base_name},
-                    {"$push": {"files": file_data}}
-                )
-                movie_doc["files"].append(file_data)
+                update_fields = {"$push": {"files": file_data}}
+                if cover and not movie_doc.get("poster_bytes"):
+                    update_fields["$set"] = {"poster_bytes": cover}
+                await db.movie_updates.update_one({"_id": base_name}, update_fields)
                 await update_movie_message(bot, base_name)
     else:
         if any(f["filename"] == filename for f in movie_doc["files"]):
+            if cover and not movie_doc.get("poster_bytes"):
+                await db.movie_updates.update_one(
+                    {"_id": base_name},
+                    {"$set": {"poster_bytes": cover}}
+                )
+                await update_movie_message(bot, base_name)
             return
-        await db.movie_updates.update_one(
-            {"_id": base_name},
-            {"$push": {"files": file_data}}
-        )
-        movie_doc["files"].append(file_data)
+
+        update_fields = {"$push": {"files": file_data}}
+        if cover and not movie_doc.get("poster_bytes"):
+            update_fields["$set"] = {"poster_bytes": cover}
+
+        await db.movie_updates.update_one({"_id": base_name}, update_fields)
         await update_movie_message(bot, base_name)
+
 
 async def send_movie_update(bot, base_name):
     max_retries = 3
@@ -632,43 +700,21 @@ async def send_movie_update(bot, base_name):
                     url=f"https://t.me/{temp.U_NAME}?start=getfile-{base_name.replace(' ', '-')}"
                 )
             ]])
-            size=(2560, 1440) if LANDSCAPE_POSTER else (853, 1280)
+
+            # Sirf DB file ka cover/thumbnail send hoga
             cover_msg = await _send_cover(bot, movie_doc, text, buttons)
             if cover_msg is not None:
                 msg = cover_msg
                 is_photo = True
-            elif movie_doc.get("poster_url") and not LINK_PREVIEW and POSTER_SOURCE != "file":
-                # POSTER_SOURCE="file": TMDB/IMDb ka poster kabhi nahi (galat poster ka khatra); file ka cover na ho to sirf text post
-                resized_poster = await fetch_image(movie_doc["poster_url"], size)
-                if resized_poster:
-                    msg = await bot.send_photo(
-                        chat_id=MOVIE_UPDATE_CHANNEL,
-                        photo=resized_poster,
-                        caption=text,
-                        reply_markup=buttons,
-                        parse_mode=enums.ParseMode.HTML
-                    )
-                    is_photo = True
-                else:
-                    send_params = {
-                        "chat_id": MOVIE_UPDATE_CHANNEL,
-                        "text": text,
-                        "reply_markup": buttons,
-                        "parse_mode": enums.ParseMode.HTML
-                    }
-                    msg = await bot.send_message(**send_params)
-                    is_photo = False
             else:
+                # Agar DB file mein koi cover/thumbnail nahi hai, toh clean text post jayega (bina kisi galat poster ke)
                 send_params = {
                     "chat_id": MOVIE_UPDATE_CHANNEL,
                     "text": text,
                     "reply_markup": buttons,
-                    "parse_mode": enums.ParseMode.HTML
+                    "parse_mode": enums.ParseMode.HTML,
+                    "link_preview_options": LinkPreviewOptions(is_disabled=True)
                 }
-                if movie_doc.get("poster_url") and LINK_PREVIEW and POSTER_SOURCE != "file":
-                    send_params["link_preview_options"] = LinkPreviewOptions(is_disabled=False, show_above_text=ABOVE_PREVIEW)
-                else:
-                    send_params["link_preview_options"] = LinkPreviewOptions(is_disabled=not LINK_PREVIEW)
                 msg = await bot.send_message(**send_params)
                 is_photo = False
 
@@ -684,6 +730,7 @@ async def send_movie_update(bot, base_name):
             logger.error(f"Failed to send movie update: {e}")
             break
     return None
+
 
 async def update_movie_message(bot, base_name):
     try:
@@ -701,8 +748,23 @@ async def update_movie_message(bot, base_name):
 
         message_id = movie_doc.get("message_id")
         is_photo = movie_doc.get("is_photo", False)
+        has_cover = bool(movie_doc.get("poster_bytes"))
 
         if not message_id:
+            await send_movie_update(bot, base_name)
+            return
+
+        # Agar pehle text message gaya tha (kyunki 1st file mein cover nahi tha)
+        # aur ab 2nd file mein cover aa gaya hai, toh purana text message delete karke Photo ke saath naya post bhejo!
+        if not is_photo and has_cover:
+            try:
+                await bot.delete_messages(chat_id=MOVIE_UPDATE_CHANNEL, message_ids=message_id)
+            except Exception:
+                pass
+            await db.movie_updates.update_one(
+                {"_id": base_name},
+                {"$set": {"message_id": None, "is_photo": False}}
+            )
             await send_movie_update(bot, base_name)
             return
 
@@ -722,7 +784,7 @@ async def update_movie_message(bot, base_name):
                     text=text,
                     reply_markup=buttons,
                     parse_mode=enums.ParseMode.HTML,
-                    link_preview_options=LinkPreviewOptions(is_disabled=not LINK_PREVIEW, show_above_text=ABOVE_PREVIEW)
+                    link_preview_options=LinkPreviewOptions(is_disabled=True)
                 )
             return
         except (MessageIdInvalid, MessageNotModified) as e:
@@ -744,6 +806,7 @@ async def update_movie_message(bot, base_name):
             await send_movie_update(bot, base_name)
     except Exception as e:
         logger.error(f"Failed to update movie message for {base_name}: {e}")
+
 
 def generate_movie_message(movie_doc, base_name):
     all_qualities = set()
@@ -815,7 +878,6 @@ def generate_movie_message(movie_doc, base_name):
     if len(story) > 280:
         story = story[:277].rstrip() + "..."
 
-    # Quality (resolution) aur Format (source/codec) alag
     resolutions, formats = set(), set()
     for q in all_qualities:
         (resolutions if q.lower() in RESOLUTION_TERMS else formats).add(q)
@@ -837,7 +899,6 @@ def generate_movie_message(movie_doc, base_name):
     def esc(x):
         return _html.escape(str(x), quote=False)
 
-    # Jo cheez file/DB se nahi mili, uski line poori tarah gayab (N/A kabhi nahi dikhega)
     tech_lines = []
     if language_str:
         tech_lines.append(f"🔊 Aᴜᴅɪᴏ : <b>{esc(language_str)}</b>")
@@ -863,14 +924,7 @@ def generate_movie_message(movie_doc, base_name):
     divider = "\n\n――――――――――――\n\n"
 
     def build(with_story):
-        # TMDB wale mode mein hi chhupe link (poster preview) lagte hain; "file" mode mein kabhi nahi
-        hidden = ""
-        if POSTER_SOURCE != "file":
-            if movie_doc.get("poster_url"):
-                hidden += f'<a href="{movie_doc.get("poster_url")}">\u200e</a>'
-            if movie_doc.get("imdb_url"):
-                hidden += f'<a href="{movie_doc.get("imdb_url")}">\u200e</a>'
-        parts = [f"{hidden}<blockquote>✅ <b>{esc(filename_display)} {esc(year_val)} {primary_tag}</b></blockquote>"]
+        parts = [f"<blockquote>✅ <b>{esc(filename_display)} {esc(year_val)} {primary_tag}</b></blockquote>"]
         if tech_block:
             parts.append(tech_block)
         details_block = build_details(with_story)
@@ -879,7 +933,6 @@ def generate_movie_message(movie_doc, base_name):
         return divider.join(parts)
 
     text = build(True)
-    # Photo caption ki limit 1024 hai: lamba ho to pehle story hata do
     visible = re.sub(r"<[^>]+>", "", text)
     if len(visible) > 950:
         text = build(False)
