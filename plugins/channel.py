@@ -3,11 +3,27 @@ import logging
 import asyncio
 from datetime import datetime
 from collections import defaultdict
-from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details, _title_similarity
+from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
+try:
+    from plugins.Dreamxfutures.Imdbposter import _title_similarity
+except ImportError:
+    # Purani Imdbposter.py mein ye function nahi hota - isliye apna chhota version (deploy kabhi nahi tootega)
+    from difflib import SequenceMatcher as _SM
+
+    def _title_similarity(a, b) -> float:
+        a = re.sub(r"[^a-z0-9 ]", "", (a or "").lower()).strip()
+        b = re.sub(r"[^a-z0-9 ]", "", (b or "").lower()).strip()
+        if not a or not b:
+            return 0.0
+        return _SM(None, a, b).ratio()
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
 from io import BytesIO
-from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, ADMINS, POSTER_SOURCE
+from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, ADMINS
+try:
+    from info import POSTER_SOURCE
+except ImportError:
+    POSTER_SOURCE = "file"
 from Script import script
 from database.ia_filterdb import save_file, get_bad_files
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
