@@ -129,16 +129,11 @@ async def _search_media_id(query: str, api_key=None):
     multi_results = []
     words = title.split()
     
-    # Generate up to 3 fallback queries to minimize API rate limit usage
     queries_to_try = [title]
     if len(words) > 2:
-        queries_to_try.append(" ".join(words[:-1]))  # Drop the last word
-        queries_to_try.append(words[0])              # Keep just the first word
-    elif len(words) == 2:
-        queries_to_try.append(words[0])
+        queries_to_try.append(" ".join(words[:-1]))
         
-    # Remove any duplicates but preserve order, capping at 3 attempts
-    queries_to_try = list(dict.fromkeys(queries_to_try))[:3]
+    queries_to_try = list(dict.fromkeys(queries_to_try))[:2]
     
     for target_query in queries_to_try:
         if not target_query:
@@ -156,13 +151,12 @@ async def _search_media_id(query: str, api_key=None):
 
     scored_results = []
     for r in multi_results:
-        # Score the string matched against the ORIGINAL title, not the shortened target_query
         ratio = get_ratio(r.get('title') or r.get('name'), title)
-        if ratio >= 0.5:   # Lowered from 0.6 to 0.5 to allow for dropped/modified words
+        if ratio >= 0.75:
             scored_results.append((r, ratio))
 
     if not scored_results:
-        scored_results = [(r, get_ratio(r.get('title') or r.get('name'), title)) for r in multi_results[:10]]
+        return None, None
 
     today = datetime.utcnow().date()
     candidates_past, candidates_upcoming = [], []
@@ -217,8 +211,7 @@ def _process_images(images_data):
 
 async def _fetch_tmdb_data(query: str, api_key=None):
     """
-    Core TMDB lookup: search → fetch details → build response dict.
-    This replaces the external tmdb.blazeposters.workers.dev API call.
+    Core TMDB lookup: search -> fetch details -> build response dict.
     """
     media_type, media_id = await _search_media_id(query, api_key=api_key)
     if not media_id:
@@ -308,9 +301,9 @@ async def get_movie_details(query, bulk=False, id=False, file=None):
         movie_list = search_result.titles[:MAX_LIST_ELM]
         
         if year_val:
-            filtered = [m for m in movie_list if m.year and str(m.year) == str(year_val)]
+            filtered = [m for m in movie_list if m.year and abs(int(m.year) - int(year_val)) <= 1]
             if not filtered:
-                filtered = movie_list
+                return None
         else:
             filtered = movie_list
             
@@ -392,10 +385,10 @@ async def get_movie_detailsx(query, id=False, file=None):
     try:
         data = await _fetch_tmdb_data(q, api_key=TMDB_API_KEY or None)
         if not data:
-            logger.warning(f"TMDB returned no results for '{q}' → switching to IMDb fallback")
+            logger.warning(f"TMDB returned no results for '{q}' -> switching to IMDb fallback")
             return await get_movie_details(q)
     except Exception as e:
-        logger.error(f"TMDB direct call failed → fallback IMDb: {e}")
+        logger.error(f"TMDB direct call failed -> fallback IMDb: {e}")
         return await get_movie_details(q)
 
     # Normalize fields
@@ -444,4 +437,3 @@ async def get_movie_detailsx(query, id=False, file=None):
     details['backdrop_url'] = backdrop_url.replace("/original/", "/w1280/") if backdrop_url else None
 
     return details
-
