@@ -3,10 +3,11 @@ import logging
 import asyncio
 from datetime import datetime
 from collections import defaultdict
-from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details
+from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx, fetch_image, get_movie_details, _title_similarity
 from database.users_chats_db import db
 from pyrogram import Client, filters, enums
-from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, ADMINS
+from io import BytesIO
+from info import CHANNELS, MOVIE_UPDATE_CHANNEL, LINK_PREVIEW, ABOVE_PREVIEW, BAD_WORDS, LANDSCAPE_POSTER, TMDB_POSTER, ADMINS, POSTER_SOURCE
 from Script import script
 from database.ia_filterdb import save_file, get_bad_files
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
@@ -20,21 +21,21 @@ from rapidfuzz import fuzz
 logger = logging.getLogger(__name__)
 
 # Precomputed sets for faster lookups
+# NOTE: genre aur aam shabd (war, history, music, apple, prime, ben ...) yahan se hata diye hain,
+# kyunki ye asli movie ke naam ka hissa ho sakte hain ("A History of Violence", "War Machine",
+# "Ben 10", "The Apple") aur hatane se title bigad jata tha -> galat poster.
 IGNORE_WORDS = {
     "rarbg", "dub", "sub", "sample", "mkv", "aac", "combined",
-    "action", "adventure", "animation", "biography", "comedy", "crime", 
-    "documentary", "drama", "fantasy", "film-noir", "history", 
-    "horror", "music", "musical", "mystery", "romance", "sci-fi", "sport", 
-    "thriller", "war", "western", "hdcam", "hdtc", "camrip", "ts", "tc", 
-    "telesync", "dvdscr", "dvdrip", "predvd", "webrip", "web-dl", "tvrip", 
-    "hdtv", "web dl", "webdl", "bluray", "brrip", "bdrip", "360p", "480p", 
-    "720p", "1080p", "2160p", "4k", "1440p", "540p", "240p", "140p", "hevc", 
-    "hdrip", "hin", "hindi", "tam", "tamil", "kan", "kannada", "tel", "telugu", 
-    "mal", "malayalam", "eng", "english", "pun", "punjabi", "ben", "bengali", 
-    "mar", "marathi", "guj", "gujarati", "urd", "urdu", "kor", "korean", "jpn", 
-    "japanese", "nf", "netflix", "sonyliv", "sony", "sliv", "amzn", "prime", 
-    "primevideo", "hotstar", "zee5", "jio", "jhs", "aha", "hbo", "paramount", 
-    "apple", "hoichoi", "sunnxt", "viki"
+    "hdcam", "hdtc", "camrip", "ts", "tc",
+    "telesync", "dvdscr", "dvdrip", "predvd", "webrip", "web-dl", "tvrip",
+    "hdtv", "web dl", "webdl", "bluray", "brrip", "bdrip", "360p", "480p",
+    "720p", "1080p", "2160p", "4k", "1440p", "540p", "240p", "140p", "hevc",
+    "hdrip", "hin", "hindi", "tam", "tamil", "kan", "kannada", "tel", "telugu",
+    "mal", "malayalam", "eng", "english", "pun", "punjabi", "bengali",
+    "mar", "marathi", "guj", "gujarati", "urd", "urdu", "kor", "korean", "jpn",
+    "japanese", "nf", "netflix", "sonyliv", "sliv", "amzn",
+    "primevideo", "hotstar", "zee5", "jio", "jhs", "hbo",
+    "hoichoi", "sunnxt"
 }|BAD_WORDS
 
 # Constants
@@ -248,6 +249,76 @@ def schedule_update(bot, base_name, delay=5):
         delay,
         lambda: asyncio.create_task(update_movie_message(bot, base_name))
     )
+def _pick_year(filename: str, unified: str):
+    """Release year chuno. Pehle FILE NAME se (caption mein kuch bhi likha ho sakta hai).
+    Agar naam mein kai years hon ("Blade Runner 2049 2017 1080p") to quality se pehle wala
+    AAKHRI year lo, taaki title ka hissa (2049, 2012, 1917) year na ban jaye."""
+    low = filename.lower()
+    matches = list(YEAR_PATTERN.finditer(low))
+    if matches:
+        q = QUALITY_PATTERN.search(filename)
+        before = [m for m in matches if q is None or m.start() < q.start()]
+        m = (before or matches)[-1] if before else matches[0]
+        return m.group(0), m.start()
+    cm = YEAR_PATTERN.search(unified)
+    if cm:
+        return cm.group(0), low.find(cm.group(0))
+    return None, -1
+
+
+_LANG_FULL = {k: v for k, v in CAPTION_LANGUAGES.items() if len(k) > 3}
+_LANG_CODES = {k: v for k, v in CAPTION_LANGUAGES.items() if len(k) == 3}
+_LANG_NAMES = "|".join(sorted(_LANG_FULL, key=len, reverse=True))
+_LANG_FULL_RE = re.compile(r"(?<![a-z])(" + _LANG_NAMES + r")(?![a-z])|(?<![a-z])(" + _LANG_NAMES + r")(?=dub|sub)")
+_LANG_SUBTITLE_RE = re.compile(r"(?<![a-z])(?:" + "|".join(sorted(CAPTION_LANGUAGES, key=len, reverse=True)) + r")[\s._+-]*(?:subs?|subtitles?)(?![a-z])")
+_TECH_START_RE = re.compile(YEAR_PATTERN.pattern + "|" + QUALITY_PATTERN.pattern, re.IGNORECASE)
+
+
+def _find_languages(caption_text: str, filename_text: str) -> str:
+    """Audio language sirf file ke naam/caption se, poore shabd (word) match karke.
+    Pehle 'hin' jaisa chhota code kisi bhi shabd ke andar mil jata tha (jaise 'machine', 'animal') -> galat language.
+    Ab: poora naam (Hindi, Tamil...) kahin bhi; 3-akshar code (hin, tam, eng...) sirf naam ke technical hisse mein
+    (year/quality ke baad). Subtitle wale (English Subs) audio nahi gine jaate."""
+    found = set()
+    for text in (caption_text or "", filename_text or ""):
+        t = _LANG_SUBTITLE_RE.sub(" ", text.lower())
+        for m in _LANG_FULL_RE.finditer(t):
+            found.add(_LANG_FULL[m.group(1) or m.group(2)])
+        start = _TECH_START_RE.search(t)
+        if start:
+            for tok in re.findall(r"[a-z]+", t[start.start():]):
+                if tok in _LANG_CODES:
+                    found.add(_LANG_CODES[tok])
+    return ", ".join(sorted(found)) if found else "N/A"
+
+
+def _list_items(value):
+    if isinstance(value, (list, tuple, set)):
+        items = [str(x).strip() for x in value]
+    else:
+        items = [x.strip() for x in str(value or "").split(",")]
+    return [i for i in items if i and i.upper() != "N/A"]
+
+
+def _details_ok(details, base_name, media_year) -> bool:
+    """TMDB/IMDb ka result tabhi maano jab naam aur saal file se milte hon. Warna galat movie ki details/poster aa jate hain."""
+    if not details or details.get("error"):
+        return False
+    title = details.get("title") or details.get("localized_title")
+    if not title:
+        return False
+    wanted = re.sub(r"\s*\(?\b(?:19|20)\d{2}\b\)?\s*$", "", base_name or "").strip()
+    if _title_similarity(wanted, title) < 0.75:
+        return False
+    try:
+        dy, fy = int(details.get("year") or 0), int(media_year or 0)
+        if dy and fy and abs(dy - fy) > 1:
+            return False
+    except (TypeError, ValueError):
+        pass
+    return True
+
+
 def extract_media_info(filename: str, caption: str):
     filename = normalize(clean_mentions_links(filename).title())
     caption_clean = clean_mentions_links(caption).lower() if caption else ""
@@ -261,8 +332,7 @@ def extract_media_info(filename: str, caption: str):
         quality = get_qualities(filename.lower())
     ott_platform = extract_ott_platform(f"{filename} {caption_clean}")
 
-    lang_keys = {k for k in CAPTION_LANGUAGES if k in caption_clean or k in filename.lower()}
-    language = ", ".join(sorted({CAPTION_LANGUAGES[k] for k in lang_keys})) if lang_keys else "N/A"
+    language = _find_languages(caption_clean, filename.lower())
 
     season, episode = extract_season_episode(filename)
     if season is not None:
@@ -280,9 +350,8 @@ def extract_media_info(filename: str, caption: str):
                     processed_raw = filename[:yi+4]
                     base_raw += f" {y}"
     else:
-        if year_match := YEAR_PATTERN.search(unified):
-            year = year_match.group(0)
-            year_idx = filename.lower().find(year.lower())
+        year, year_idx = _pick_year(filename, unified)
+        if year:
             if year_idx != -1:
                 processed_raw = filename[:year_idx + 4]
                 base_raw = processed_raw
@@ -389,11 +458,50 @@ async def media_handler(bot, message):
 
     try:
         if await db.movie_update_status(bot.me.id):
-            await process_and_send_update(bot, media.file_name, media.caption)
+            cover = await _get_file_cover(bot, media) if POSTER_SOURCE == "file" else None
+            await process_and_send_update(bot, media.file_name, media.caption, cover)
     except Exception:
         logger.exception("Error processing media")
 
-async def process_and_send_update(bot, filename, caption):
+async def _get_file_cover(bot, media):
+    """File ka apna cover (thumbnail) download karke bytes deta hai; nahi ho to None."""
+    try:
+        thumbs = getattr(media, "thumbs", None)
+        if not thumbs:
+            return None
+        data = await bot.download_media(thumbs[-1].file_id, in_memory=True)
+        if not data:
+            return None
+        raw = data.getvalue() if hasattr(data, "getvalue") else bytes(data)
+        return raw or None
+    except Exception as e:
+        logger.warning(f"File cover download failed: {e}")
+        return None
+
+
+async def _send_cover(bot, movie_doc, text, buttons):
+    """Update channel mein file ke cover ke saath post bhejta hai. Fail ho to None (TMDB poster wala raasta chalega)."""
+    cover = movie_doc.get("poster_bytes")
+    if not cover or LINK_PREVIEW:
+        return None
+    try:
+        bio = BytesIO(bytes(cover))
+        bio.name = "cover.jpg"
+        return await bot.send_photo(
+            chat_id=MOVIE_UPDATE_CHANNEL,
+            photo=bio,
+            caption=text,
+            reply_markup=buttons,
+            parse_mode=enums.ParseMode.HTML
+        )
+    except FloodWait:
+        raise
+    except Exception as e:
+        logger.warning(f"Cover post failed, using TMDB poster instead: {e}")
+        return None
+
+
+async def process_and_send_update(bot, filename, caption, cover=None):
     try:
         media_info = extract_media_info(filename, caption)
         base_name = media_info["base_name"]
@@ -401,7 +509,7 @@ async def process_and_send_update(bot, filename, caption):
 
         lock = locks[base_name]
         async with lock:
-            await _process_with_lock(bot, filename, caption, media_info, base_name, processed)
+            await _process_with_lock(bot, filename, caption, media_info, base_name, processed, cover)
     except PyMongoError as e:
         logger.error(f"Database error in process_and_send_update: {e}")
         raise
@@ -409,7 +517,7 @@ async def process_and_send_update(bot, filename, caption):
         logger.exception(f"Processing failed in process_and_send_update: {e}")
         raise
 
-async def _process_with_lock(bot, filename, caption, media_info, base_name, processed):
+async def _process_with_lock(bot, filename, caption, media_info, base_name, processed, cover=None):
     if not hasattr(db, 'movie_updates'):
         db.movie_updates = db.db.movie_updates
 
@@ -428,14 +536,21 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
     }
 
     if not movie_doc:
+        details = {}
         if TMDB_POSTER:
-            details = await get_movie_detailsx(base_name)
-            if not details or details.get("error") or (not details.get("poster_url") and not details.get("backdrop_url")):
-                error_tmdb=True
-                logger.info("TMDB error switching to IMDB")
-                details = await get_movie_details(base_name) or {}
-        else:
-            details = await get_movie_details(base_name) or {}
+            d = await get_movie_detailsx(base_name)
+            has_img = bool(d and (d.get("poster_url") or d.get("backdrop_url")))
+            if _details_ok(d, base_name, media_info["year"]) and (has_img or POSTER_SOURCE == "file"):
+                details = d
+            else:
+                error_tmdb = True
+                logger.info("TMDB match not good, trying IMDB")
+        if not details:
+            d = await get_movie_details(base_name) or {}
+            if _details_ok(d, base_name, media_info["year"]):
+                details = d
+            else:
+                logger.info(f"No reliable movie details for '{base_name}' - post will show only file info")
 
         raw_genres = details.get("genres", "N/A")
         if isinstance(raw_genres, str):
@@ -448,7 +563,7 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             "files": [file_data],
             "poster_url": details.get("backdrop_url") if LANDSCAPE_POSTER and TMDB_POSTER and details.get("backdrop_url") and not error_tmdb else details.get("poster_url"),
             "genres": genres,
-            "cast": details.get("cast") or "N/A",
+            "cast": ", ".join(_list_items(details.get("cast"))[:5]) or "N/A",
             "story": details.get("plot") or "N/A",
             "rating": details.get("rating", "N/A"),
             "imdb_url": details.get("url", "")if not TMDB_POSTER or error_tmdb else details.get("tmdb_url"),
@@ -458,7 +573,8 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
             "message_id": None,
             "is_photo": False,
             "error_tmdb": error_tmdb,
-            "is_backdrop": details.get("backdrop_url")
+            "is_backdrop": details.get("backdrop_url"),
+            "poster_bytes": cover if (POSTER_SOURCE == "file" and cover) else None
         }
         try:
             await db.movie_updates.insert_one(movie_doc)
@@ -501,7 +617,12 @@ async def send_movie_update(bot, base_name):
                 )
             ]])
             size=(2560, 1440) if LANDSCAPE_POSTER else (853, 1280)
-            if movie_doc.get("poster_url") and not LINK_PREVIEW:
+            cover_msg = await _send_cover(bot, movie_doc, text, buttons)
+            if cover_msg is not None:
+                msg = cover_msg
+                is_photo = True
+            elif movie_doc.get("poster_url") and not LINK_PREVIEW and POSTER_SOURCE != "file":
+                # POSTER_SOURCE="file": TMDB/IMDb ka poster kabhi nahi (galat poster ka khatra); file ka cover na ho to sirf text post
                 resized_poster = await fetch_image(movie_doc["poster_url"], size)
                 if resized_poster:
                     msg = await bot.send_photo(
@@ -528,7 +649,7 @@ async def send_movie_update(bot, base_name):
                     "reply_markup": buttons,
                     "parse_mode": enums.ParseMode.HTML
                 }
-                if movie_doc.get("poster_url") and LINK_PREVIEW:
+                if movie_doc.get("poster_url") and LINK_PREVIEW and POSTER_SOURCE != "file":
                     send_params["link_preview_options"] = LinkPreviewOptions(is_disabled=False, show_above_text=ABOVE_PREVIEW)
                 else:
                     send_params["link_preview_options"] = LinkPreviewOptions(is_disabled=not LINK_PREVIEW)
@@ -669,43 +790,81 @@ def generate_movie_message(movie_doc, base_name):
         if season_lines:
             season_episode_block = "\n".join(season_lines) + "\n"
 
-    genres = movie_doc.get("genres", "N/A")
-    cast = movie_doc.get("cast") or "N/A"
-    story = movie_doc.get("story") or "N/A"
+    import html as _html
+    genres_list = _list_items(movie_doc.get("genres"))
+    cast_list = _list_items(movie_doc.get("cast"))[:5]
+    story = str(movie_doc.get("story") or "").strip()
+    if story.upper() == "N/A":
+        story = ""
+    if len(story) > 280:
+        story = story[:277].rstrip() + "..."
 
-    # Split the combined quality matches into resolution-only (Quality) and
-    # source/format-only (Format) buckets, e.g. "720p, WEB-DL, HEVC" ->
-    # Quality: 720p | Format: WEB-DL, HEVC
+    # Quality (resolution) aur Format (source/codec) alag
     resolutions, formats = set(), set()
     for q in all_qualities:
         (resolutions if q.lower() in RESOLUTION_TERMS else formats).add(q)
-    quality_str = " + ".join(sorted(resolutions, key=lambda s: int(re.sub(r'\D', '', s) or 0))) if resolutions else "N/A"
-    format_str = ", ".join(sorted(formats)) if formats else "N/A"
+    quality_str = " + ".join(sorted(resolutions, key=lambda x: int(re.sub(r'\D', '', x) or 0))) if resolutions else ""
+    format_str = ", ".join(sorted(formats)) if formats else ""
+    language_str = ", ".join(sorted(all_languages)) if all_languages else ""
 
-    language_str = ", ".join(sorted(all_languages)) if all_languages else "N/A"
-    rating = movie_doc.get("rating", "-")
     try:
-        r = float(rating)
+        r = float(movie_doc.get("rating"))
     except (TypeError, ValueError):
         r = 0.0
+    rating_text = str(movie_doc.get("rating")) if r > 0 else ""
 
-    rating_text = "-" if r == 0.0 else str(rating)
     year_val = str(movie_doc.get("year") or "")
     filename_display = base_name
     if year_val and filename_display.strip().endswith(year_val):
         filename_display = filename_display.strip()[:-len(year_val)].strip()
-    return script.MOVIE_UPDATE_NOTIFY_TXT.format(
-        poster_url=movie_doc.get("poster_url", ""),
-        imdb_url=movie_doc.get("imdb_url", ""),
-        filename=filename_display,
-        tag=primary_tag,
-        year=year_val,
-        genres=genres,
-        cast=cast,
-        story=story,
-        quality=quality_str,
-        format=format_str,
-        language=language_str,
-        season_episode_block=season_episode_block,
-        rating=rating_text,
-)
+
+    def esc(x):
+        return _html.escape(str(x), quote=False)
+
+    # Jo cheez file/DB se nahi mili, uski line poori tarah gayab (N/A kabhi nahi dikhega)
+    tech_lines = []
+    if language_str:
+        tech_lines.append(f"🔊 Aᴜᴅɪᴏ : <b>{esc(language_str)}</b>")
+    if quality_str:
+        tech_lines.append(f"🌿 Qᴜᴀʟɪᴛʏ : <b>{esc(quality_str)}</b>")
+    if format_str:
+        tech_lines.append(f"📌 Fᴏʀᴍᴀᴛ : <b>{esc(format_str)}</b>")
+    tech_block = season_episode_block + "\n".join(tech_lines)
+    tech_block = tech_block.strip("\n")
+
+    def build_details(with_story):
+        lines = []
+        if rating_text:
+            lines.append(f"⭐ Rᴀᴛɪɴɢ : <b>{esc(rating_text)}/10</b>")
+        if genres_list:
+            lines.append(f"🎭 Gᴇɴʀᴇs : <b>{esc(', '.join(genres_list))}</b>")
+        if cast_list:
+            lines.append(f"👥 Cᴀsᴛ : <b>{esc(', '.join(cast_list))}</b>")
+        if with_story and story:
+            lines.append(f"📜 Sᴛᴏʀʏ : {esc(story)}")
+        return f"<blockquote expandable>{chr(10).join(lines)}</blockquote>" if lines else ""
+
+    divider = "\n\n――――――――――――\n\n"
+
+    def build(with_story):
+        # TMDB wale mode mein hi chhupe link (poster preview) lagte hain; "file" mode mein kabhi nahi
+        hidden = ""
+        if POSTER_SOURCE != "file":
+            if movie_doc.get("poster_url"):
+                hidden += f'<a href="{movie_doc.get("poster_url")}">\u200e</a>'
+            if movie_doc.get("imdb_url"):
+                hidden += f'<a href="{movie_doc.get("imdb_url")}">\u200e</a>'
+        parts = [f"{hidden}<blockquote>✅ <b>{esc(filename_display)} {esc(year_val)} {primary_tag}</b></blockquote>"]
+        if tech_block:
+            parts.append(tech_block)
+        details_block = build_details(with_story)
+        if details_block:
+            parts.append(details_block)
+        return divider.join(parts)
+
+    text = build(True)
+    # Photo caption ki limit 1024 hai: lamba ho to pehle story hata do
+    visible = re.sub(r"<[^>]+>", "", text)
+    if len(visible) > 950:
+        text = build(False)
+    return text
