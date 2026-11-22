@@ -194,22 +194,60 @@ def _hashtags(langs):
     return ", ".join(tags)
 
 
-def build_caption(message, media, langs, fallback_text):
-    file_name = getattr(media, "file_name", "") or ""
-    if message.caption:
-        base = message.caption.html
-    else:
-        base = f"<b>{html.escape(file_name)}</b>" if file_name else ""
+_NATIVE = ["हिन्दी", "हिंदी", "தமிழ்", "తెలుగు", "മലയാളം", "ಕನ್ನಡ", "বাংলা", "मराठी", "ਪੰਜਾਬੀ", "ગુજરાતી",
+           "اردو", "日本語", "한국어", "中文", "国语", "粤语", "ไทย", "العربية", "Русский"]
+_SPK = "[\U0001F508\U0001F509\U0001F50A]"  # 🔈 🔉 🔊
+_AUDIO_KW = r"\b(audio|languages?)\s*[:~\-–|]"
 
+
+def _plain(h):
+    return html.unescape(re.sub(r"<[^>]+>", "", h or ""))
+
+
+def _is_lang_text(t):
+    t = _plain(t)
+    return bool(
+        re.search(_SPK, t)
+        or re.search(_AUDIO_KW, t, re.I)
+        or any(n in t for n in _NATIVE)
+        or detect_in_text(t)
+    )
+
+
+def strip_lang_lines(h):
+    """Caption se purani language wali quote / line hata deta hai (baaki caption jaisa hai waisa)."""
+    h = re.sub(
+        r"<blockquote[^>]*>.*?</blockquote>",
+        lambda m: "" if _is_lang_text(m.group(0)) else m.group(0),
+        h or "",
+        flags=re.S | re.I,
+    )
+    kept = []
+    for ln in h.split("\n"):
+        pl = _plain(ln).strip()
+        if pl and (re.match(_SPK, pl) or re.match(_AUDIO_KW, pl, re.I)):
+            continue
+        kept.append(ln)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+def clean_base(message, media):
+    """Caption ka html (purani language hata ke). Khali ho toh file ka naam (bold)."""
+    file_name = getattr(media, "file_name", "") or ""
+    base = strip_lang_lines(message.caption.html) if message.caption else ""
+    if not _plain(base).strip():
+        base = f"<b>{html.escape(file_name)}</b>" if file_name else ""
+    return base
+
+
+def build_caption(base, file_name, langs, fallback_text):
     line = ""
     if langs:
         line = f"<blockquote>🔊 {_hashtags(langs)}</blockquote>"
     elif fallback_text:
         line = f"<blockquote>🔊 {fallback_text}</blockquote>"
 
-    if line and "🔊" in base:
-        line = ""
-    if len(re.sub(r"<[^>]+>", "", base + line)) > 1000:  # Telegram caption limit 1024
+    if len(_plain(base + line)) > 1000:  # Telegram caption limit 1024
         base = f"<b>{html.escape(file_name)}</b>" if file_name else ""
     return f"{base}\n\n{line}".strip() if base and line else (base or line)
 
@@ -219,9 +257,12 @@ async def _process(client, message):
     if not media:
         return
 
+    file_name = getattr(media, "file_name", "") or ""
+    base = clean_base(message, media)  # purani (galat ho sakti hai) language quote hata di
+
     langs, unresolved, n_audio = await scan_audio_languages(client, message, media)
 
-    text = f"{getattr(media, 'file_name', '') or ''} {message.caption or ''}"
+    text = f"{file_name} {_plain(base)}"
     if not langs or unresolved or n_audio == 0:
         # file ke andar language tag nahi mila (und) -> file name / caption se poori karo
         for name in detect_in_text(text):
@@ -235,7 +276,7 @@ async def _process(client, message):
         elif SHOW_UNKNOWN:
             fallback_text = "#Unknown"
 
-    caption = build_caption(message, media, langs, fallback_text)
+    caption = build_caption(base, file_name, langs, fallback_text)
 
     # Original file ka poster/cover (video_cover) copy mein bhi chahiye
     cover_media = getattr(media, "video_cover", None) or getattr(media, "cover", None)
