@@ -237,16 +237,27 @@ async def _process(client, message):
 
     caption = build_caption(message, media, langs, fallback_text)
 
+    # Original file ka poster/cover (video_cover) copy mein bhi chahiye
+    cover_media = getattr(media, "video_cover", None) or getattr(media, "cover", None)
+    cover_id = getattr(cover_media, "file_id", None)
+
     new = None
-    for _ in range(2):
+    for _ in range(3):
         try:
             new = await message.copy(
-                message.chat.id, caption=caption, parse_mode=enums.ParseMode.HTML
+                message.chat.id,
+                caption=caption,
+                parse_mode=enums.ParseMode.HTML,
+                video_cover=cover_id,
             )
             break
         except FloodWait as e:
             await asyncio.sleep(e.value + 1)
         except Exception:
+            if cover_id:  # cover ki wajah se error aaya toh bina cover ke bhej do
+                logger.exception("Lens: cover ke saath send fail, bina cover ke bhej raha hu")
+                cover_id = None
+                continue
             logger.exception("Lens: file wapis bhejne mein error")
             return
 
@@ -286,9 +297,27 @@ async def lens_handler(client, message):
     if (message.chat.id, message.id) in _own_ids:
         return
     cid = message.chat.id
+    logger.info("Lens: file mili chat=%s msg=%s -> queue mein", cid, message.id)
     heapq.heappush(_queues[cid], (message.id, next(_counter), message))
     if cid not in _workers:
         _workers[cid] = asyncio.create_task(_worker(client, cid))
+
+
+_seen_other = set()
+
+
+@Client.on_message(
+    (filters.channel | filters.group) & (filters.document | filters.video | filters.audio) & ~filters.chat(LENS_CHANNELS),
+    group=-6,
+)
+async def lens_debug(client, message):
+    """Sirf diagnosis: batata hai ki kaunsi chat ki file aayi par LENS_CHANNELS mein match nahi hui."""
+    cid = message.chat.id
+    if cid in _seen_other or len(_seen_other) > 50:
+        return
+    _seen_other.add(cid)
+    logger.info("Lens DEBUG: chat id=%s title=%s ki file aayi, par ye LENS_CHANNELS mein nahi hai (abhi: %s)",
+                cid, message.chat.title, LENS_CHANNELS)
 
 
 logger.info("Lens plugin loaded. Chats: %s | delete original: %s", LENS_CHANNELS, DELETE_ORIGINAL)
