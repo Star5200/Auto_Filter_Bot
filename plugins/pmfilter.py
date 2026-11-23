@@ -1795,6 +1795,22 @@ async def ai_spell_check(chat_id, wrong_name):
             return movie
         movie_list.remove(movie)
 
+async def _notify_no_result(client, message, search):
+    """Jo search DB mein nahi mili uska #NoResults message BIN_CHANNEL mein bhejo + notify-me ke liye request save karo."""
+    user = message.from_user
+    if not user:
+        return
+    if NO_RESULTS_MSG:
+        try:
+            await client.send_message(chat_id=BIN_CHANNEL, text=script.NORSLTS.format(user.id, user.mention, search))
+        except Exception as e:
+            logger.error("NoResults BIN_CHANNEL mein nahi gaya: %s - BIN_CHANNEL id aur bot admin check karo", e)
+    try:
+        await db.add_movie_request(user.id, user.mention, search)
+    except Exception as e:
+        logger.error("Movie request save nahi hui: %s", e)
+
+
 async def advantage_spell_chok(client, message):
     bot_health.record_missed()
     search = message.text
@@ -1806,6 +1822,7 @@ async def advantage_spell_chok(client, message):
         movies = await get_poster(search, bulk=True)
     except Exception as e:
         logger.exception("get_poster failed for query=%s: %s", query, e)
+        await _notify_no_result(client, message, search)
         try:
             k = await message.reply(script.I_CUDNT.format(message.from_user.mention))
             await asyncio.sleep(60)
@@ -1821,6 +1838,7 @@ async def advantage_spell_chok(client, message):
             pass
         return
     if not movies:
+        await _notify_no_result(client, message, search)
         google = quote_plus(search)
         button = [[InlineKeyboardButton(
             "🔍 ᴄʜᴇᴄᴋ sᴘᴇʟʟɪɴɢ ᴏɴ ɢᴏᴏɢʟᴇ 🔍", url=f"https://www.google.com/search?q={google}")]]
