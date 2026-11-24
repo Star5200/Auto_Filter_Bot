@@ -1,8 +1,10 @@
 import logging
 import bot_health
 from utils import upi_copy_button, build_result_header, get_random_mix_id, get_size, is_subscribed, is_req_subscribed, group_setting_buttons, get_poster, get_posterx, temp, get_settings, save_group_settings, get_cap, imdb, is_check_admin, extract_request_content, log_error, clean_filename, generate_season_variations, clean_search_text, get_settings_text
-from rapidfuzz import process
-from info import SHOW_IMDB_POSTER
+from rapidfuzz import process, fuzz
+import uuid
+from info import SHOW_IMDB_POSTER, TMDB_API_KEY
+from plugins.Dreamxfutures.Imdbposter import _tmdb_get
 from dreamxbotz.util.file_properties import get_name, get_hash
 from urllib.parse import quote_plus, unquote_plus
 
@@ -23,6 +25,7 @@ from pyrogram.errors.exceptions.bad_request_400 import MediaEmpty, PhotoInvalidD
 from database.refer import referdb
 from database.users_chats_db import db
 import asyncio
+import time
 import re
 import math
 import random
@@ -1795,41 +1798,172 @@ async def ai_spell_check(chat_id, wrong_name):
             return movie
         movie_list.remove(movie)
 
-async def _notify_no_result(client, message, search):
-    """Jo search DB mein nahi mili uska #NoResults message BIN_CHANNEL mein bhejo + notify-me ke liye request save karo."""
-    user = message.from_user
+SPELL_SUGGEST = {}  # token -> movie title (suggestion buttons ke liye)
+
+
+def _remember_suggestion(title):
+    tok = uuid.uuid4().hex[:8]
+    if len(SPELL_SUGGEST) > 500:
+        SPELL_SUGGEST.pop(next(iter(SPELL_SUGGEST)), None)
+    SPELL_SUGGEST[tok] = title
+    return tok
+
+
+async def _imdb_suggest(q):
+    try:
+        res = await asyncio.wait_for(get_poster(q, bulk=True), timeout=10)
+        return [(m.title, getattr(m, "year", None)) for m in (res or []) if getattr(m, "title", None)]
+    except Exception as e:
+        logger.warning("IMDb suggestion failed for %r: %s", q, e)
+        return []
+
+
+async def _tmdb_suggest(q):
+    try:
+        data = await asyncio.wait_for(
+            _tmdb_get("search/multi",
+                      params={"query": q, "language": "en-US", "page": 1, "include_adult": "false"},
+                      api_key=TMDB_API_KEY or None),
+            timeout=10)
+        out = []
+        for r in data.get("results", []):
+            if r.get("media_type") not in ("movie", "tv"):
+                continue
+            title = r.get("title") or r.get("name")
+            year = (r.get("release_date") or r.get("first_air_date") or "")[:4] or None
+            if title:
+                out.append((title, year))
+        return out
+    except Exception as e:
+        logger.warning("TMDB suggestion failed for %r: %s", q, e)
+        return []
+
+
+async def spelling_suggestions(search, limit=5):
+    """Galat spelling ke liye IMDb + TMDB se milte-julte movie/series naam -> [(title, year)]"""
+    base = re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (search or "").lower())).strip()
+    if not base:
+        return []
+    variants = [base]
+    long_words = [w for w in base.split() if len(w) >= 4]
+    if long_words:
+        longest = max(long_words, key=len)
+        if longest != base:
+            variants.append(longest)  # poora naam na mile toh sabse lamba shabd try karo
+    out, seen = [], set()
+    for i, q in enumerate(variants):
+        imdb_r, tmdb_r = await asyncio.gather(_imdb_suggest(q), _tmdb_suggest(q))
+        merged = []
+        for j in range(max(len(imdb_r), len(tmdb_r))):  # IMDb aur TMDB barabar mix
+            if j < len(imdb_r):
+                merged.append(imdb_r[j])
+            if j < len(tmdb_r):
+                merged.append(tmdb_r[j])
+        for title, year in merged:
+            key = (title.lower(), str(year or ""))
+            if key in seen:
+                continue
+            if i > 0 and fuzz.WRatio(base, title.lower()) < 55:  # dheele variant ke result sirf tab jab naam milta ho
+                continue
+            seen.add(key)
+            out.append((title, year))
+        if out:
+            break
+    return out[:limit]
+
+
+_NOTIFIED = {}  # (user_id, naam) -> time, taaki ek hi user ki ek hi movie BIN_CHANNEL mein baar-baar na jaye
+_CHAT_WORDS = {
+    "hi", "hii", "hiii", "hiiii", "hello", "helo", "hlo", "hey", "heyy", "hy", "hlw", "bro", "bhai", "bhaiya", "sir",
+    "admin", "bot", "test", "testing", "ok", "okay", "ko", "thanks", "thank", "you", "thx", "tnx", "good", "morning",
+    "night", "evening", "afternoon", "gm", "gn", "how", "are", "kaise", "ho", "kya", "hal", "hai", "yes", "no", "help",
+    "start", "menu", "please", "pls", "plz", "sorry", "namaste", "salam", "hmm", "haan", "nahi", "what", "who", "why",
+    "movie", "movies", "film", "send", "link", "new", "latest", "hd", "download", "dubbed", "hindi", "english",
+}
+_TITLE_NOISE = re.compile(
+    r"\b((19|20)\d{2}|s\d{1,2}(e\d{1,3})?|e\d{1,3}|season|series|movie|movies|film|full|hindi|english|dubbed|"
+    r"download|480p|720p|1080p|hd|web|dl)\b", re.I)
+
+
+def _norm_title(t):
+    t = _TITLE_NOISE.sub(" ", (t or "").lower())
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", t)).strip()
+
+
+def _exact_real_title(search, suggestions):
+    """Search text kisi asli movie/series ke naam jaisa (sahi spelling) hai? -> uska title, warna None.
+    'hi', 'hello' jaise chat ke shabd kabhi nahi (varna har message BIN_CHANNEL mein jaata)."""
+    raw_words = re.findall(r"[a-z0-9]+", (search or "").lower())
+    if not raw_words or all(w in _CHAT_WORDS for w in raw_words) or len(raw_words) > 8:
+        return None
+    base = _norm_title(search)
+    if len(base.replace(" ", "")) < 4:
+        return None
+    for title, _year in suggestions:
+        if fuzz.ratio(base, _norm_title(title)) >= 97:  # sirf sahi spelling (1 akshar ka fark = typo, suggestion dikhao)
+            return title
+    return None
+
+
+async def _notify_missing(bot, user, text):
+    """Asli movie jo DB mein nahi hai: #NoResults BIN_CHANNEL mein + notify-me ke liye request save."""
     if not user:
         return
+    key = (user.id, _norm_title(text))
+    now = time.time()
+    if now - _NOTIFIED.get(key, 0) < 6 * 3600:
+        return
+    if len(_NOTIFIED) > 1000:
+        _NOTIFIED.clear()
+    _NOTIFIED[key] = now
     if NO_RESULTS_MSG:
         try:
-            await client.send_message(chat_id=BIN_CHANNEL, text=script.NORSLTS.format(user.id, user.mention, search))
+            await bot.send_message(chat_id=BIN_CHANNEL, text=script.NORSLTS.format(user.id, user.mention, text))
         except Exception as e:
             logger.error("NoResults BIN_CHANNEL mein nahi gaya: %s - BIN_CHANNEL id aur bot admin check karo", e)
     try:
-        await db.add_movie_request(user.id, user.mention, search)
+        await db.add_movie_request(user.id, user.mention, text)
     except Exception as e:
-        logger.error("Movie request save nahi hui: %s", e)
+        logger.error("Could not save movie request for notify-me feature: %s", e)
+
+
+@Client.on_callback_query(filters.regex(r"^dspl#"))
+async def spell_suggestion_choice(bot, query):
+    _, tok, user = query.data.split("#")
+    if int(user) != 0 and query.from_user.id != int(user):
+        return await query.answer(script.ALRT_TXT.format(query.from_user.first_name), show_alert=True)
+    movie = SPELL_SUGGEST.get(tok)
+    if not movie:
+        return await query.answer("Ye suggestion purani ho gayi, dobara search karo", show_alert=True)
+    movie = re.sub(r"[:-]", " ", movie)
+    movie = re.sub(r"\s+", " ", movie).strip()
+    await query.answer(script.TOP_ALRT_MSG)
+    files, offset, total_results = await get_search_results(query.message.chat.id, movie, offset=0, filter=True)
+    if files:
+        return await auto_filter(bot, query, (movie, files, offset, total_results))
+    # Suggested movie asli hai par DB mein nahi -> BIN_CHANNEL mein #NoResults + request save
+    await _notify_missing(bot, query.from_user, movie)
+    btn = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔰Cʟɪᴄᴋ ʜᴇʀᴇ & ʀᴇǫᴜᴇsᴛ ᴛᴏ ᴀᴅᴍɪɴ🔰", url=OWNER_LNK)]])
+    k = await query.message.edit(script.MVE_NT_FND, reply_markup=btn)
+    await asyncio.sleep(10)
+    await k.delete()
 
 
 async def advantage_spell_chok(client, message):
     bot_health.record_missed()
     search = message.text
-    query = re.sub(
-        r"\b(pl(i|e)*?(s|z+|ease|se|ese|(e+)s(e)?)|((send|snd|giv(e)?|gib)(\sme)?)|movie(s)?|new|latest|br((o|u)h?)*|^h(e|a)?(l)*(o)*|mal(ayalam)?|t(h)?amil|file|that|find|und(o)*|kit(t(i|y)?)?o(w)?|thar(u)?(o)*w?|kittum(o)*|aya(k)*(um(o)*)?|full\smovie|any(one)|with\ssubtitle(s)?)",
-        "", message.text, flags=re.IGNORECASE)
-    query = query.strip() + " movie"
-    try:
-        movies = await get_poster(search, bulk=True)
-    except Exception as e:
-        logger.exception("get_poster failed for query=%s: %s", query, e)
-        await _notify_no_result(client, message, search)
+    suggestions = await spelling_suggestions(search)  # IMDb + TMDB
+    exact = _exact_real_title(search, suggestions)
+    if exact:
+        # Naam sahi hai aur movie asli hai, par DB mein nahi -> BIN_CHANNEL mein #NoResults + request save
+        await _notify_missing(client, message.from_user, search)
+        btn = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔰Cʟɪᴄᴋ ʜᴇʀᴇ & ʀᴇǫᴜᴇsᴛ ᴛᴏ ᴀᴅᴍɪɴ🔰", url=OWNER_LNK)]])
+        k = await message.reply_text(script.MVE_NT_FND, reply_markup=btn, reply_to_message_id=message.id)
+        await asyncio.sleep(30)
         try:
-            k = await message.reply(script.I_CUDNT.format(message.from_user.mention))
-            await asyncio.sleep(60)
-            try:
-                await k.delete()
-            except Exception:
-                pass
+            await k.delete()
         except Exception:
             pass
         try:
@@ -1837,31 +1971,38 @@ async def advantage_spell_chok(client, message):
         except Exception:
             pass
         return
-    if not movies:
-        await _notify_no_result(client, message, search)
+    if not suggestions:
+        # Kahin se kuch nahi mila -> sirf "no files" message (BIN_CHANNEL mein kuch nahi jaata)
         google = quote_plus(search)
         button = [[InlineKeyboardButton(
             "🔍 ᴄʜᴇᴄᴋ sᴘᴇʟʟɪɴɢ ᴏɴ ɢᴏᴏɢʟᴇ 🔍", url=f"https://www.google.com/search?q={google}")]]
         k = await message.reply_text(text=script.I_CUDNT.format(search), reply_markup=InlineKeyboardMarkup(button))
         await asyncio.sleep(60)
-        await k.delete()
+        try:
+            await k.delete()
+        except Exception:
+            pass
         try:
             await message.delete()
         except Exception:
             pass
         return
-    user = message.from_user.id if message.from_user else 0
+    uid = message.from_user.id if message.from_user else 0
+    mention = message.from_user.mention if message.from_user else ""
     buttons = [
-        [InlineKeyboardButton(text=movie.title, callback_data=f"spol#{movie.imdb_id}#{user}")
-         ] for movie in movies]
-
+        [InlineKeyboardButton(
+            text=(f"{title} ({year})" if year else title)[:60],
+            callback_data=f"dspl#{_remember_suggestion(title)}#{uid}")]
+        for title, year in suggestions]
     buttons.append([InlineKeyboardButton(
         text="🚫 ᴄʟᴏsᴇ 🚫", callback_data='close_data', style=enums.ButtonStyle.DANGER)])
-    d = await message.reply_text(text=script.CUDNT_FND.format(message.from_user.mention), reply_markup=InlineKeyboardMarkup(buttons), reply_to_message_id=message.id)
+    d = await message.reply_text(text=script.CUDNT_FND.format(mention), reply_markup=InlineKeyboardMarkup(buttons), reply_to_message_id=message.id)
     await asyncio.sleep(60)
-    await d.delete()
+    try:
+        await d.delete()
+    except Exception:
+        pass
     try:
         await message.delete()
     except Exception:
         pass
-    
